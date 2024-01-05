@@ -27,6 +27,7 @@ executable("tir") {
         sources += [
             "src/linux_file.cpp",
             "src/linux_memory.cpp",
+            "src/linux_thread.cpp",
         ]
     }
 }

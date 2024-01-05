@@ -15,6 +15,8 @@
 
 extern "C" char *realpath(const char *path, char *resolved_path);
 
+String exe_path;
+
 
 bool file_exists_sz(const char *sz_path)
 {
@@ -214,7 +216,6 @@ bool is_directory(String path)
 
 String get_exe_folder(Allocator mem)
 {
-    extern String exe_path;
     return duplicate_string(exe_path, mem);
 }
 
