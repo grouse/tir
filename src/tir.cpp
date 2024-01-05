@@ -22,20 +22,60 @@ enum Keyword : i32 {
     KW_RETURN,
 };
 
-Keyword keyword_from_string(String str)
-{
-    if (str == "return") return KW_RETURN;
-    return KW_INVALID;
-}
-
 enum ASTType : i32 {
     AST_INVALID = 0,
+
     AST_RETURN,
     AST_PROCEDURE,
     AST_LITERAL,
     AST_STATEMENT_LIST,
     AST_BINARY_OP,
 };
+
+enum BinaryOp : i8 {
+    OP_INVALID = 0,
+
+    OP_ADD,
+    // OP_SUB
+    // OP_MUL,
+    // OP_DIV,
+    //
+    // OP_AND,
+    // OP_NAND,
+    // OP_OR,
+    // OP_NOR,
+    // OP_XOR,
+    //
+    // OP_EQ,
+    // OP_NEQ,
+    // OP_LT,
+    // OP_LTE,
+    // OP_GT,
+    // OP_GTE,
+    //
+    // OP_SHL,
+    // OP_SHR,
+};
+const char* sz_from_enum(BinaryOp op)
+{
+    switch (op) {
+    case OP_ADD:     return "+";
+    case OP_INVALID: return "invalid";
+    }
+}
+
+
+enum UnaryOp : i8 {
+    UOP_INVALID = 0,
+
+    // UOP_NEG,
+};
+const char* sz_from_enum(UnaryOp op)
+{
+    switch (op) {
+    case UOP_INVALID: return "invalid";
+    }
+}
 
 
 struct AST {
@@ -48,7 +88,7 @@ struct AST {
             AST *body;
         } proc;
         struct {
-            Token op;
+            BinaryOp op;
             AST *lhs;
             AST *rhs;
         } binary_op;
@@ -65,6 +105,13 @@ struct AST {
     };
 };
 
+Keyword keyword_from_string(String str)
+{
+    if (str == "return") return KW_RETURN;
+    return KW_INVALID;
+}
+
+
 static char indent[256];
 void debug_print_ast(AST *ast, i32 depth = 0)
 {
@@ -74,7 +121,7 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             LOG_INFO("%.*sliteral %.*s", depth, indent, STRFMT(ast->literal.token.str));
             break;
         case AST_BINARY_OP:
-            LOG_INFO("%.*sbinary op %.*s", depth, indent, STRFMT(ast->binary_op.op.str));
+            LOG_INFO("%.*sbinary op %s", depth, indent, sz_from_enum(ast->binary_op.op));
             debug_print_ast(ast->binary_op.lhs, depth+1);
             debug_print_ast(ast->binary_op.rhs, depth+1);
             break;
@@ -97,6 +144,17 @@ void debug_print_ast(AST *ast, i32 depth = 0)
     }
 }
 
+BinaryOp optional_parse_binary_op(Lexer *lexer)
+{
+    if (optional_token(lexer, '+')) return OP_ADD;
+    return OP_INVALID;
+}
+
+UnaryOp optional_parse_unary_op(Lexer *)
+{
+    return UOP_INVALID;
+}
+
 AST* parse_subexpression(Lexer *lexer, Allocator mem)
 {
     AST *expr = nullptr;
@@ -109,10 +167,7 @@ AST* parse_subexpression(Lexer *lexer, Allocator mem)
         return nullptr;
     }
 
-    Token op = peek_token(lexer);
-    if (op == '+') {
-        next_token(lexer);
-
+    if (BinaryOp op = optional_parse_binary_op(lexer); op) {
         AST *lhs = expr;
         AST *rhs = parse_subexpression(lexer, mem);
 
@@ -162,6 +217,7 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
                     .type = AST_RETURN,
                     .ret.expr = parse_expression(lexer, mem)
                 };
+                break;
             }
 
             return ast;
@@ -215,15 +271,10 @@ int main(int argc, char *argv[])
             if (lexer.t.type == TOKEN_IDENTIFIER) {
                 Token identifier = lexer.t;
 
-                i32 kw = keyword_from_string(identifier.str);
-                if (kw != KW_INVALID) {
+                if (i32 kw = keyword_from_string(identifier.str); kw != KW_INVALID) {
                     switch (kw) {
                     case KW_RETURN:
-                        ast = ast->next = ALLOC_T(mem, AST) {
-                            .type = AST_RETURN,
-                            .ret.token = identifier,
-                            .ret.expr = parse_expression(&lexer, mem),
-                        };
+                        PARSE_ERROR(&lexer, "unexpected return statement");
                         break;
                     }
                 } else if (peek_token(&lexer) == ':' && peek_nth_token(&lexer, 2) == ':') {
@@ -243,5 +294,6 @@ int main(int argc, char *argv[])
 
         debug_print_ast(root.next);
     }
+
     return 0;
 }
