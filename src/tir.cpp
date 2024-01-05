@@ -34,6 +34,7 @@ enum ASTType : i32 {
     AST_PROCEDURE,
     AST_LITERAL,
     AST_STATEMENT_LIST,
+    AST_BINARY_OP,
 };
 
 
@@ -46,6 +47,11 @@ struct AST {
             Token identifier;
             AST *body;
         } proc;
+        struct {
+            Token op;
+            AST *lhs;
+            AST *rhs;
+        } binary_op;
         struct {
             Token token;
         } literal;
@@ -67,9 +73,13 @@ void debug_print_ast(AST *ast, i32 depth = 0)
         case AST_LITERAL:
             LOG_INFO("%.*sliteral %.*s", depth, indent, STRFMT(ast->literal.token.str));
             break;
+        case AST_BINARY_OP:
+            LOG_INFO("%.*sbinary op %.*s", depth, indent, STRFMT(ast->binary_op.op.str));
+            debug_print_ast(ast->binary_op.lhs, depth+1);
+            debug_print_ast(ast->binary_op.rhs, depth+1);
+            break;
         case AST_PROCEDURE:
             LOG_INFO("%.*sprocedure %.*s", depth, indent, STRFMT(ast->proc.identifier.str));
-            //if (ast->proc.params) debug_print_ast(ast->proc.params, depth+1);
             if (ast->proc.body) debug_print_ast(ast->proc.body, depth+1);
             break;
         case AST_RETURN:
@@ -77,30 +87,52 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             if (ast->ret.expr) debug_print_ast(ast->ret.expr, depth+1);
             break;
         case AST_STATEMENT_LIST:
-            LOG_INFO("%.*sstatements {", depth, indent);
+            LOG_INFO("%.*sstatements", depth, indent);
             for (AST *stmt = ast->stmt_list.stmts; stmt; stmt = stmt->next) {
                 debug_print_ast(stmt, depth+1);
             }
-            LOG_INFO("%.*s}", depth, indent);
             break;
         case AST_INVALID: break;
         }
     }
 }
 
+AST* parse_subexpression(Lexer *lexer, Allocator mem)
+{
+    AST *expr = nullptr;
+    if (optional_token(lexer, TOKEN_INTEGER)) {
+        expr = ALLOC_T(mem, AST) {
+            .type = AST_LITERAL,
+            .literal.token = lexer->t,
+        };
+    } else {
+        return nullptr;
+    }
+
+    Token op = peek_token(lexer);
+    if (op == '+') {
+        next_token(lexer);
+
+        AST *lhs = expr;
+        AST *rhs = parse_subexpression(lexer, mem);
+
+        expr = ALLOC_T(mem, AST) {
+            .type = AST_BINARY_OP,
+            .binary_op.op = op,
+            .binary_op.lhs = lhs,
+            .binary_op.rhs = rhs,
+        };
+    }
+
+    return expr;
+}
+
 AST* parse_expression(Lexer *lexer, Allocator mem)
 {
-    AST *ast = nullptr;
-
-    AST **ptr = &ast;
-    for (; *lexer && next_token(lexer) != ';';) {
-        if (lexer->t == TOKEN_INTEGER) {
-            *ptr = ALLOC_T(mem, AST) {
-                .type = AST_LITERAL,
-                .literal.token = lexer->t,
-            };
-            ptr = &(*ptr)->next;
-        }
+    AST *ast = parse_subexpression(lexer, mem);
+    if (!require_next_token(lexer, ';')) {
+        PARSE_ERROR(lexer, "unclosed expression");
+        return nullptr;
     }
 
     return ast;
@@ -108,7 +140,7 @@ AST* parse_expression(Lexer *lexer, Allocator mem)
 
 AST* parse_statement(Lexer *lexer, Allocator mem)
 {
-    if (next_token(lexer) == '{') {
+    if (optional_token(lexer, '{')) {
         AST *ast = ALLOC_T(mem, AST) {
             .type = AST_STATEMENT_LIST,
         };
@@ -119,23 +151,23 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
             if (*ptr) ptr = &(*ptr)->next;
         }
         return ast;
-    } else {
-        if (lexer->t == TOKEN_IDENTIFIER) {
-            Token identifier = lexer->t;
-            i32 kw = keyword_from_string(identifier.str);
-            if (kw != KW_INVALID) {
-                AST *ast = nullptr;
-                switch (kw) {
-                case KW_RETURN:
-                    ast = ALLOC_T(mem, AST) {
-                        .type = AST_RETURN,
-                        .ret.expr = parse_expression(lexer, mem)
-                    };
-                }
+    } else if (require_next_token(lexer, TOKEN_IDENTIFIER)) {
+        Token identifier = lexer->t;
 
-                return ast;
+        if (i32 kw = keyword_from_string(identifier.str); kw != KW_INVALID) {
+            AST *ast = nullptr;
+            switch (kw) {
+            case KW_RETURN:
+                ast = ALLOC_T(mem, AST) {
+                    .type = AST_RETURN,
+                    .ret.expr = parse_expression(lexer, mem)
+                };
             }
+
+            return ast;
         }
+    } else {
+        PARSE_ERROR(lexer, "expected statement");
     }
 
     return nullptr;
