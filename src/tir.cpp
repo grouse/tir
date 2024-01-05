@@ -177,6 +177,9 @@ AST* parse_subexpression(Lexer *lexer, Allocator mem)
             .binary_op.lhs = lhs,
             .binary_op.rhs = rhs,
         };
+    } else if (Token t = peek_token(lexer); t != ';') {
+        PARSE_ERROR(lexer, "unknown operator in expression '%.*s'", STRFMT(t.str));
+        return nullptr;
     }
 
     return expr;
@@ -201,12 +204,18 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
         };
 
         AST **ptr = &ast->stmt_list.stmts;
-        while (*lexer && lexer->t != '}') {
+        while (*lexer && peek_token(lexer) != '}') {
             *ptr = parse_statement(lexer, mem);
             if (*ptr) ptr = &(*ptr)->next;
         }
+
+        if (!require_next_token(lexer, '}')) {
+            PARSE_ERROR(lexer, "unclosed statement list");
+            return nullptr;
+        }
+
         return ast;
-    } else if (next_token(lexer) == TOKEN_IDENTIFIER) {
+    } else if (optional_token(lexer, TOKEN_IDENTIFIER)) {
         Token identifier = lexer->t;
 
         if (i32 kw = keyword_from_string(identifier.str); kw != KW_INVALID) {
@@ -221,11 +230,13 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
             }
 
             return ast;
+        } else {
+            PARSE_ERROR(lexer, "unexpected identifier '%.*s'", STRFMT(lexer->t.str));
+            return nullptr;
         }
     }
 
     return nullptr;
-
 }
 
 int main(int argc, char *argv[])
@@ -276,10 +287,16 @@ int main(int argc, char *argv[])
                         PARSE_ERROR(&lexer, "unexpected return statement");
                         break;
                     }
-                } else if (peek_token(&lexer) == ':' && peek_nth_token(&lexer, 2) == ':') {
+                } else if (peek_token(&lexer) == ':' &&
+                           peek_nth_token(&lexer, 2) == ':')
+                {
                     if (peek_nth_token(&lexer, 3) == '(') {
                         next_nth_token(&lexer, 3);
-                        if (!require_next_token(&lexer, ')')) return -1;
+
+                        if (!require_next_token(&lexer, ')')) {
+                            PARSE_ERROR(&lexer, "expected ')'");
+                            break;
+                        }
 
                         ast = ast->next = ALLOC_T(mem, AST) {
                             .type = AST_PROCEDURE,
@@ -287,6 +304,9 @@ int main(int argc, char *argv[])
                             .proc.body = parse_statement(&lexer, mem),
                         };
                     }
+                } else {
+                    PARSE_ERROR(&lexer, "unexpected identifier '%.*s'", STRFMT(identifier.str));
+                    return -1;
                 }
             }
         }
