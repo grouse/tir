@@ -8,11 +8,13 @@ Token next_token(Lexer *lexer, u32 flags) EXPORT
         if (lexer->ptr[0] == ' ' || lexer->ptr[0] == '\t') {
             t.type = TOKEN_WHITESPACE;
             t.str.data = lexer->ptr++;
+            lexer->col++; // TODO: utf8
 
             while (lexer->ptr < lexer->end &&
                    (lexer->ptr[0] == ' ' || lexer->ptr[0] == '\t'))
             {
                 lexer->ptr++;
+                lexer->col++; // TODO: utf8
             }
 
             t.str.length = (i32)(lexer->ptr - t.str.data);
@@ -21,7 +23,7 @@ Token next_token(Lexer *lexer, u32 flags) EXPORT
             t.type = TOKEN_NEWLINE;
             t.str.data = lexer->ptr;
 
-            lexer->line_number++;
+            lexer->line++; lexer->col = 0;
             if (lexer->ptr[0] == '\r') lexer->ptr++;
             if (lexer->ptr[0] == '\n') lexer->ptr++;
 
@@ -32,12 +34,14 @@ Token next_token(Lexer *lexer, u32 flags) EXPORT
         {
             t.type = TOKEN_INTEGER;
             t.str.data = lexer->ptr++;
+            lexer->col++; // TODO: utf8
 
             while (lexer->ptr < lexer->end) {
                 if (t.type == TOKEN_INTEGER && *lexer->ptr == '.') {
                     t.type = TOKEN_NUMBER;
                 } else if (*lexer->ptr > '9' || *lexer->ptr < '0') break;
                 lexer->ptr++;
+                lexer->col++; // TODO: utf8
             }
 
             t.str.length = (i32)(lexer->ptr - t.str.data);
@@ -48,6 +52,7 @@ Token next_token(Lexer *lexer, u32 flags) EXPORT
         {
             t.type = TOKEN_IDENTIFIER;
             t.str.data = lexer->ptr++;
+            lexer->col++; // TODO: utf8
 
             while (lexer->ptr < lexer->end) {
                 if ((*lexer->ptr < 'a' || *lexer->ptr > 'z') &&
@@ -59,6 +64,7 @@ Token next_token(Lexer *lexer, u32 flags) EXPORT
                 }
 
                 lexer->ptr++;
+                lexer->col++; // TODO: utf8
             }
 
             t.str.length = (i32)(lexer->ptr - t.str.data);
@@ -67,6 +73,7 @@ Token next_token(Lexer *lexer, u32 flags) EXPORT
             t.type = (TokenType)*lexer->ptr;
             t.str = { lexer->ptr, 1 };
             lexer->ptr++;
+            lexer->col++; // TODO: utf8
             return t;
         }
     }
