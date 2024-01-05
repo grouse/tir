@@ -1,0 +1,67 @@
+executable("tir") {
+    libs = []
+
+    sources = [
+        "src/tir.cpp",
+
+        "src/core.cpp",
+        "src/lexer.cpp",
+        "src/memory.cpp",
+        "src/string.cpp",
+    ]
+
+    include_dirs = [
+        "build",
+        "external"
+    ]
+
+    if (current_os == "win") {
+        sources += [
+            "src/win32_file.cpp",
+            "src/win32_memory.cpp",
+            "src/win32_thread.cpp"
+        ]
+
+        libs += ["user32", "shell32", "gdi32", "shlwapi"]
+    } else if (current_os == "linux") {
+        sources += [
+            "src/linux_file.cpp",
+            "src/linux_memory.cpp",
+        ]
+    }
+}
+
+group("tools") {
+    deps = [ "//tools/gh" ]
+}
+
+action_foreach("gh") {
+    deps = [ "//tools/gh" ]
+    script = "tools/exe.py"
+    sources = [
+        "src/tir.cpp",
+        "src/core.cpp",
+        "src/lexer.cpp",
+        "src/memory.cpp",
+        "src/string.cpp",
+    ]
+
+    mnemonic = "generate-headers"
+
+    outputs = [
+        "$target_gen_dir/{{source_name_part}}.h",
+        "$target_gen_dir/internal/{{source_name_part}}.h",
+    ]
+
+    if (current_os == "win") {
+        exe = rebase_path(root_build_dir, "") + "/gh.exe"
+    } else {
+        exe = rebase_path(root_build_dir, "") + "/gh"
+    }
+
+    args = [
+        exe,
+        "{{source}}",
+        "-o", rebase_path(target_gen_dir, ""),
+    ]
+}

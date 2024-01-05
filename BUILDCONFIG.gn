@@ -1,0 +1,42 @@
+if (target_os == "") { target_os = host_os }
+if (target_cpu == "") { target_cpu = host_cpu }
+
+if (current_os == "") { current_os = target_os }
+if (current_cpu == "") { current_cpu = target_cpu }
+
+declare_args() {
+    is_optimized = false
+    is_debug = true
+    disable_warnings = false
+}
+
+is_win = current_os == "win" || current_os == "winuwp"
+set_default_toolchain("//gn/toolchains:${target_os}_${target_cpu}")
+
+default_compiler_configs = []
+default_compiler_configs += [
+    "//gn/config:compiler",
+    "//gn/config:warnings"
+]
+
+if (is_debug) { default_compiler_configs += ["//gn/config:debug"] }
+else { default_compiler_configs += ["//gn/config:release"] }
+
+if (is_optimized) { default_compiler_configs += ["//gn/config:optimize"] }
+if (disable_warnings) { default_compiler_configs += "//gn/config:no_warnings" }
+
+set_defaults("executable") {
+    configs = default_compiler_configs
+}
+
+set_defaults("static_library") {
+    configs = default_compiler_configs
+}
+
+set_defaults("shared_library") {
+    configs = default_compiler_configs
+}
+
+export_compile_commands = [
+    "//*"
+]

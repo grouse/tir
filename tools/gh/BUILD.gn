@@ -1,0 +1,21 @@
+executable("gh") {
+    sources = [ "gh.cpp" ]
+    libs = []
+
+    lib_dirs = []
+    include_dirs = []
+
+    if (is_win) {
+        lib_dirs += [ "//external/LLVM/lib/win64" ]
+        include_dirs += [ "//external/LLVM/include" ]
+
+        libs += [ "libclang" ]
+    } else {
+        lib_dirs += [ "/usr/lib/llvm-16/lib" ]
+        include_dirs += [ "/usr/lib/llvm-16/include" ]
+
+        libs += [ "clang" ]
+    }
+
+    configs += [ "//gn/config:optimize" ]
+}

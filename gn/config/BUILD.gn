@@ -1,0 +1,52 @@
+config("compiler") {
+    cflags = [ "-ferror-limit=0", "-fno-rtti", "-fno-exceptions", "-fdiagnostics-absolute-paths"]
+    cflags_c = []
+    cflags_cc = [ "-std=c++20" ]
+    ldflags = []
+    defines = []
+    configs = []
+    include_dirs = [ "//" ]
+
+    if (is_win) {
+        defines += ["_CRT_SECURE_NO_WARNINGS"]
+    }
+}
+
+config("debug") {
+    cflags = ["-g"]
+    ldflags = ["-g"]
+}
+
+config("release") {
+}
+
+config("no_warnings") {
+    cflags = ["-w"]
+}
+
+config("warnings") {
+    cflags = [ "-Wall", "-Wextra" ]
+    cflags_cc = [
+        "-Wno-missing-braces",
+        "-Wno-char-subscripts",
+        "-Wno-c99-designator",
+        "-Wno-missing-field-initializers",
+        "-Wno-non-c-typedef-for-linkage"
+    ]
+}
+
+config("max_warnings") {
+    cflags = ["-Wall", "-Wextra"]
+}
+
+config("no_optimize") {
+    cflags = ["-O0"]
+}
+
+config("optimize") {
+    cflags = ["-O2"]
+}
+
+config("max_optimise") {
+    cflags = ["-O3"]
+}

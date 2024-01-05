@@ -1,0 +1,97 @@
+
+
+
+toolchain("win_x64") {
+    tool("cc") {
+        depfile = "{{output}}.d"
+        command = "clang -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+        depsformat = "gcc"
+        description = "CC {{output}}"
+        outputs = [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
+    }
+    tool("cxx") {
+        depfile = "{{output}}.d"
+        depsformat = "gcc"
+        command = "clang++ -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+        description = "CXX {{output}}"
+        outputs = [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
+    }
+    tool("link") {
+        default_output_extension = ".exe"
+        default_output_dir = "{{root_out_dir}}"
+
+        exename = "{{output_dir}}/{{target_output_name}}{{output_extension}}"
+        rspfile = "$exename.rsp"
+        rspfile_content = "{{inputs_newline}} {{libs}} {{solibs}} {{ldflags}} {{rlibs}}"
+
+        command = "clang++ {{ldflags}} -o$exename @$rspfile {{libs}}"
+        description = "LINK {{output}}"
+
+        outputs = [ exename ]
+        runtime_outputs = outputs
+    }
+    tool("alink") {
+        default_output_extension = ".lib"
+        default_output_dir = "{{target_out_dir}}"
+
+        rspfile = "{{output}}.rsp"
+        rspfile_content = "{{inputs_newline}}"
+
+        command = "lld-link.exe /lib \"/OUT:{{output}}\" /nologo {{arflags}} \"@$rspfile\""
+        description = "LIB {{output}}"
+        outputs = [ "{{output_dir}}/{{target_output_name}}.lib" ]
+    }
+    tool("stamp") {
+        command = "cmd /c type nul > \"{{output}}\""
+        description = "STAMP {{output}}"
+    }
+}
+
+toolchain("linux_x64") {
+    tool("cc") {
+        depfile = "{{output}}.d"
+        command = "clang -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+        depsformat = "gcc"
+        description = "CC {{output}}"
+        outputs = [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
+    }
+    tool("cxx") {
+        depfile = "{{output}}.d"
+        depsformat = "gcc"
+        command = "clang++ -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+        description = "CXX {{output}}"
+        outputs = [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
+    }
+    tool("link") {
+        default_output_extension = ""
+        default_output_dir = "{{root_out_dir}}"
+
+        exename = "{{target_output_name}}{{output_extension}}"
+        outfile = "{{output_dir}}/$exename"
+
+        rspfile = "$outfile.rsp"
+        rspfile_content = "{{inputs}}"
+
+        command = "clang++ {{ldflags}} -o \"$outfile\" -Wl,--start-group @\"$rspfile\" {{solibs}} -Wl,--end-group {{libs}} {{rlibs}}"
+        description = "LINK {{output}}"
+
+        outputs = [ outfile ]
+        runtime_outputs = outputs
+    }
+    tool("alink") {
+        default_output_extension = ".a"
+        default_output_dir = "{{target_out_dir}}"
+        output_prefix = "lib"
+
+        rspfile = "{{output}}.rsp"
+        rspfile_content = "{{inputs}}"
+
+        command = "ar -rcs {{arflags}} {{output}} {{inputs}}"
+        description = "AR {{output}}"
+        outputs = [ "{{output_dir}}/{{target_output_name}}{{output_extension}}" ]
+    }
+    tool("stamp") {
+        command = "touch {{output}}"
+        description = "STAMP {{output}}"
+    }
+}
