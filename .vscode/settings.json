@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "*.tcc": "cpp",
+        "limits": "cpp",
+        "mutex": "cpp",
+        "streambuf": "cpp",
+        "string_view": "cpp",
+        "functional": "cpp",
+        "tuple": "cpp"
+    }
+}
