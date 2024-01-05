@@ -106,7 +106,6 @@ bool require_next_token(Lexer *lexer, TokenType type, Token *t) EXPORT
 {
     *t = next_token(lexer);
     if (t->type != type && (type == TOKEN_NUMBER && t->type != TOKEN_INTEGER)) {
-        PARSE_ERROR(lexer, "unexpected token: expected '%s', got '%s'", sz_from_enum(type), sz_from_enum(t->type));
         return false;
     }
     return true;
@@ -116,11 +115,7 @@ bool require_next_token(Lexer *lexer, TokenType type, Token *t) EXPORT
 bool require_next_token(Lexer *lexer, char c, Token *t /*= nullptr */) EXPORT
 {
     next_token(lexer);
-    if (lexer->t.type != (TokenType)c) {
-        PARSE_ERROR(lexer, "unexpected token: expected '%c', got '%s'", c, sz_from_enum(lexer->t.type));
-        return false;
-    }
-
+    if (lexer->t.type != (TokenType)c) return false;
     if (t) *t = lexer->t;
     return true;
 }
@@ -157,11 +152,7 @@ bool parse_version_decl(Lexer *lexer, i32 *version_out, i32 max_version) EXPORT
 {
     if (!require_next_token(lexer, '#', &lexer->t)) return false;
     if (!require_next_token(lexer, TOKEN_IDENTIFIER, &lexer->t)) return false;
-
-    if (lexer->t != "version") {
-        PARSE_ERROR(lexer, "expected identifier 'version', got '%.*s'", STRFMT(lexer->t.str));
-        return false;
-    }
+    if (lexer->t != "version") return false;
 
     Token version_token;
     if (!require_next_token(lexer, TOKEN_INTEGER, &version_token)) return false;
@@ -210,7 +201,10 @@ bool parse_string(Lexer *lexer, String *str) EXPORT
 
     if (next_token(lexer) == '"') {
         str->data = lexer->t.str.data+1;
-        if (!eat_until(lexer, '"')) return false;
+        if (!eat_until(lexer, '"')) {
+            PARSE_ERROR(lexer, "parsing string; expected '\"', got '%.*s'", STRFMT(lexer->t.str));
+            return false;
+        }
         str->length = (i32)((i64)lexer->t.str.data - (i64)str->data);
     } else {
         *str = lexer->t.str;
@@ -238,7 +232,7 @@ bool parse_bool(Lexer *lexer, bool *value) EXPORT
     if (lexer->t == "true") *value = true;
     else if (lexer->t == "false") *value = false;
     else {
-        PARSE_ERROR(lexer, "expected 'true' or 'false', got '%.*s'", STRFMT(lexer->t.str));
+        PARSE_ERROR(lexer, "parsing boolean; expected 'true' or 'false', got '%.*s'", STRFMT(lexer->t.str));
         return false;
     }
 
