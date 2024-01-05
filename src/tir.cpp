@@ -206,7 +206,7 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
             if (*ptr) ptr = &(*ptr)->next;
         }
         return ast;
-    } else if (require_next_token(lexer, TOKEN_IDENTIFIER)) {
+    } else if (next_token(lexer) == TOKEN_IDENTIFIER) {
         Token identifier = lexer->t;
 
         if (i32 kw = keyword_from_string(identifier.str); kw != KW_INVALID) {
@@ -222,11 +222,10 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
 
             return ast;
         }
-    } else {
-        PARSE_ERROR(lexer, "expected statement");
     }
 
     return nullptr;
+
 }
 
 int main(int argc, char *argv[])
