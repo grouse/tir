@@ -30,9 +30,9 @@ Keyword keyword_from_string(String str)
 
 enum ASTType : i32 {
     AST_INVALID = 0,
-    AST_ROOT,
     AST_RETURN,
     AST_PROCEDURE,
+    AST_LITERAL,
     AST_STATEMENT_LIST,
 };
 
@@ -43,13 +43,17 @@ struct AST {
     ASTType type;
     union {
         struct {
-            String name;
+            Token identifier;
             AST *body;
         } proc;
+        struct {
+            Token token;
+        } literal;
         struct {
             AST *stmts;
         } stmt_list;
         struct {
+            Token token;
             AST *expr;
         } ret;
     };
@@ -60,11 +64,11 @@ void debug_print_ast(AST *ast, i32 depth = 0)
 {
     for (; ast; ast = ast->next) {
         switch (ast->type) {
-        case AST_ROOT:
-            LOG_INFO("%.*s[root]", depth, indent);
+        case AST_LITERAL:
+            LOG_INFO("%.*sliteral %.*s", depth, indent, STRFMT(ast->literal.token.str));
             break;
         case AST_PROCEDURE:
-            LOG_INFO("%.*sprocedure %.*s", depth, indent, STRFMT(ast->proc.name));
+            LOG_INFO("%.*sprocedure %.*s", depth, indent, STRFMT(ast->proc.identifier.str));
             //if (ast->proc.params) debug_print_ast(ast->proc.params, depth+1);
             if (ast->proc.body) debug_print_ast(ast->proc.body, depth+1);
             break;
@@ -84,11 +88,22 @@ void debug_print_ast(AST *ast, i32 depth = 0)
     }
 }
 
-AST* parse_expression(Lexer *lexer, Allocator )
+AST* parse_expression(Lexer *lexer, Allocator mem)
 {
+    AST *ast = nullptr;
+
+    AST **ptr = &ast;
     for (; *lexer && next_token(lexer) != ';';) {
+        if (lexer->t == TOKEN_INTEGER) {
+            *ptr = ALLOC_T(mem, AST) {
+                .type = AST_LITERAL,
+                .literal.token = lexer->t,
+            };
+            ptr = &(*ptr)->next;
+        }
     }
-    return nullptr;
+
+    return ast;
 }
 
 AST* parse_statement(Lexer *lexer, Allocator mem)
@@ -157,9 +172,9 @@ int main(int argc, char *argv[])
             return -1;
         }
 
-        Allocator mem = tl_linear_allocator(10*MiB);
+        Allocator mem = tl_linear_allocator(MAX_AST_MEM);
 
-        AST root{ .type = AST_ROOT };
+        AST root{};
         AST *ast = &root;
 
         Lexer lexer{ f.data, f.size, file };
@@ -174,6 +189,7 @@ int main(int argc, char *argv[])
                     case KW_RETURN:
                         ast = ast->next = ALLOC_T(mem, AST) {
                             .type = AST_RETURN,
+                            .ret.token = identifier,
                             .ret.expr = parse_expression(&lexer, mem),
                         };
                         break;
@@ -185,7 +201,7 @@ int main(int argc, char *argv[])
 
                         ast = ast->next = ALLOC_T(mem, AST) {
                             .type = AST_PROCEDURE,
-                            .proc.name = identifier.str,
+                            .proc.identifier = identifier,
                             .proc.body = parse_statement(&lexer, mem),
                         };
                     }
@@ -193,7 +209,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        debug_print_ast(&root);
+        debug_print_ast(root.next);
     }
     return 0;
 }
