@@ -32,42 +32,6 @@ enum ASTType : i32 {
     AST_BINARY_OP,
 };
 
-enum BinaryOp : i8 {
-    OP_INVALID = 0,
-
-    OP_ADD,
-    OP_SUB,
-    OP_MUL,
-    OP_DIV,
-    //
-    // OP_AND,
-    // OP_NAND,
-    // OP_OR,
-    // OP_NOR,
-    // OP_XOR,
-    //
-    // OP_EQ,
-    // OP_NEQ,
-    // OP_LT,
-    // OP_LTE,
-    // OP_GT,
-    // OP_GTE,
-    //
-    // OP_SHL,
-    // OP_SHR,
-};
-const char* sz_from_enum(BinaryOp op)
-{
-    switch (op) {
-    case OP_ADD:     return "+";
-    case OP_SUB:     return "-";
-    case OP_MUL:     return "*";
-    case OP_DIV:     return "/";
-    case OP_INVALID: return "invalid";
-    }
-}
-
-
 enum UnaryOp : i8 {
     UOP_INVALID = 0,
 
@@ -91,7 +55,7 @@ struct AST {
             AST *body;
         } proc;
         struct {
-            BinaryOp op;
+            Token op;
             AST *lhs;
             AST *rhs;
         } binary_op;
@@ -124,7 +88,7 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             LOG_INFO("%.*sliteral %.*s", depth, indent, STRFMT(ast->literal.token.str));
             break;
         case AST_BINARY_OP:
-            LOG_INFO("%.*sbinary op %s", depth, indent, sz_from_enum(ast->binary_op.op));
+            LOG_INFO("%.*sbinary op %.*s", depth, indent, STRFMT(ast->binary_op.op.str));
             debug_print_ast(ast->binary_op.lhs, depth+1);
             debug_print_ast(ast->binary_op.rhs, depth+1);
             break;
@@ -147,28 +111,35 @@ void debug_print_ast(AST *ast, i32 depth = 0)
     }
 }
 
-BinaryOp binary_op_from_token(Token t)
-{
-    if (t.type == '+') return OP_ADD;
-    if (t.type == '-') return OP_SUB;
-    if (t.type == '*') return OP_MUL;
-    if (t.type == '/') return OP_DIV;
-    return OP_INVALID;
-}
-
 UnaryOp optional_parse_unary_op(Lexer *)
 {
     return UOP_INVALID;
 }
 
-i32 operator_precedence(BinaryOp op)
+i32 operator_precedence(Token op)
 {
-    switch (op) {
-    case OP_ADD: return 10;
-    case OP_SUB: return 10;
-    case OP_MUL: return 20;
-    case OP_DIV: return 20;
-    default: return 0;
+    switch (op.type) {
+    case '+':
+    case '-':
+        return 10;
+    case '*':
+    case '/':
+        return 20;
+    default:
+        return 0;
+    }
+}
+
+bool is_binary_op(Token t)
+{
+    switch (t.type) {
+    case '+':
+    case '-':
+    case '*':
+    case '/':
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -190,8 +161,8 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
     // }
 
     while (*lexer) {
-        BinaryOp op = binary_op_from_token(peek_token(lexer));
-        if (!op) break;
+        Token op = peek_token(lexer);
+        if (!is_binary_op(op)) break;
 
         i32 prec = operator_precedence(op);
         if (prec < min_prec) break;
