@@ -8,8 +8,13 @@
 #define PARSE_ERROR(lexer, fmt, ...)\
     LOG_ERROR("parse error: %.*s:%d:%d: " fmt, STRFMT((lexer)->debug_name), (lexer)->line+1, (lexer)->col+1, ##__VA_ARGS__)
 
-enum TokenType : u8 {
-    TOKEN_START = 127, // NOTE(jesper): 0-127 reserved for ascii token values
+enum TokenType : u16 {
+    TOKEN_ADD = '+',
+    TOKEN_SUB = '-',
+    TOKEN_MUL = '*',
+    TOKEN_DIV = '/',
+
+    TOKEN_START = 255, // NOTE(jesper): 0-255 reserved for ascii token values
 
     TOKEN_IDENTIFIER,
     TOKEN_INTEGER,
