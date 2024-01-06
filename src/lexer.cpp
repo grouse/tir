@@ -3,10 +3,10 @@
 Token next_token(Lexer *lexer, u32 flags) EXPORT
 {
     Token &t = lexer->t;
-    t.l0 = lexer->line;
-    t.c0 = lexer->col;
 
     while (*lexer) {
+        t.l0 = lexer->line; t.c0 = lexer->col;
+
         if (lexer->ptr[0] == ' ' || lexer->ptr[0] == '\t') {
             t.type = TOKEN_WHITESPACE;
             t.str.data = lexer->ptr++;

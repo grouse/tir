@@ -6,7 +6,7 @@
 #include "core.h"
 
 #define PARSE_ERROR(lexer, fmt, ...)\
-    LOG_ERROR("parse error: %.*s:%d:%d: " fmt, STRFMT((lexer)->debug_name), (lexer)->t.l0+1, (lexer)->t.c0, ##__VA_ARGS__)
+    LOG_ERROR("parse error: %.*s:%d:%d: " fmt, STRFMT((lexer)->debug_name), (lexer)->t.l0+1, (lexer)->t.c0+1, ##__VA_ARGS__)
 
 enum TokenType : u16 {
     TOKEN_ADD = '+',
