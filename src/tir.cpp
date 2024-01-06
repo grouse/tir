@@ -159,6 +159,12 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
     //         .unary_op.expr = parse_prim_expression(lexer, mem),
     //     };
     // }
+    else if (peek_token(lexer) != ';') {
+        next_token(lexer);
+        PARSE_ERROR(lexer, "unexpected token '%.*s' in expression", STRFMT(lexer->t.str));
+        return nullptr;
+    }
+
 
     while (*lexer) {
         Token op = peek_token(lexer);
