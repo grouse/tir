@@ -6,7 +6,7 @@
 #include "core.h"
 
 #define PARSE_ERROR(lexer, fmt, ...)\
-    LOG_ERROR("parse error: %.*s:%d:%d: " fmt, STRFMT((lexer)->debug_name), (lexer)->line+1, (lexer)->col+1, ##__VA_ARGS__)
+    LOG_ERROR("parse error: %.*s:%d:%d: " fmt, STRFMT((lexer)->debug_name), (lexer)->t.l0+1, (lexer)->t.c0, ##__VA_ARGS__)
 
 enum TokenType : u16 {
     TOKEN_ADD = '+',
@@ -29,6 +29,8 @@ enum TokenType : u16 {
 struct Token {
     TokenType type;
     String str;
+
+    i32 l0, c0;
 
     bool operator==(String str) const { return this->str == str; }
     bool operator==(char c) const { return type == (TokenType)c; }
