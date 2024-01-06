@@ -5,17 +5,7 @@
 
 #include <cstdlib>
 #include <stdio.h>
-
-void print_usage()
-{
-    printf("Usage: tir [options] <source>\n");
-    printf("\n");
-    printf("Options:\n");
-    printf("  -h, --help     Print this help message\n");
-    printf("\n");
-    printf("Arguments:\n");
-    printf("  <source>       The source file to compile\n");
-}
+#include <string.h>
 
 enum Keyword : i32 {
     KW_INVALID = 0,
@@ -224,6 +214,65 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
     return nullptr;
 }
 
+void emit_ast_x64(StringBuilder *sb, AST *ast);
+
+void emit_ast_x64_mov(StringBuilder *sb, String dst, AST *src)
+{
+    if (src->type == AST_LITERAL) {
+        append_stringf(sb, "mov %.*s, %.*s\n", STRFMT(dst), STRFMT(src->literal.token.str));
+    } else if (src->type == AST_BINARY_OP) {
+        emit_ast_x64(sb, src->binary_op.lhs);
+        append_stringf(sb, "push eax\n");
+        emit_ast_x64(sb, src->binary_op.rhs);
+        append_stringf(sb, "pop ebx\n");
+
+        switch (src->binary_op.op.type) {
+        case '+': append_stringf(sb, "add eax, ebx\n"); break;
+        case '-': append_stringf(sb, "sub eax, ebx\n"); break;
+        case '*': append_stringf(sb, "imul eax, ebx\n"); break;
+        case '/': append_stringf(sb, "idiv ebx\n"); break;
+        default: LOG_ERROR("Invalid binary op '%.*s'", STRFMT(src->binary_op.op.str)); break;
+        }
+
+        if (dst != "eax") append_stringf(sb, "mov %.*s, eax\n", STRFMT(dst));
+    } else {
+        LOG_ERROR("Invalid AST node type '%d'", src->type);
+    }
+}
+
+void emit_ast_x64(StringBuilder *sb, AST *ast)
+{
+    while (ast) {
+        switch (ast->type) {
+        case AST_LITERAL:
+            append_stringf(sb, "mov eax, %.*s\n", STRFMT(ast->literal.token.str));
+            break;
+        case AST_PROCEDURE:
+            append_stringf(sb, "%.*s:\n", STRFMT(ast->proc.identifier.str));
+            emit_ast_x64(sb, ast->proc.body);
+            break;
+        case AST_BINARY_OP:
+            emit_ast_x64_mov(sb, "eax", ast);
+            break;
+        case AST_RETURN:
+            if (ast->ret.expr) emit_ast_x64_mov(sb, "eax", ast->ret.expr);
+            append_stringf(sb, "ret\n");
+            break;
+        default: LOG_ERROR("Invalid AST node type '%d'", ast->type); break;
+        }
+        ast = ast->next;
+    }
+}
+
+void print_usage()
+{
+    printf("Usage: tir <file> [options]\n");
+    printf("Options:\n");
+    printf("  -h, --help  Print this message\n");
+    printf("  -o <file>   Output file\n");
+    printf("\n");
+}
+
 int main(int argc, char *argv[])
 {
     for (auto &c : indent) c = ' ';
@@ -232,10 +281,24 @@ int main(int argc, char *argv[])
     init_default_allocators();
 
     char *src = nullptr;
+    char *output = nullptr;
+
     for (i32 i = 0; i < argc; i++) {
         if (argv[i][0] == '-') {
-            print_usage();
-            return 0;
+            if (argv[i][1] == 'h' || strcmp(&argv[i][1], "-help") == 0) {
+                print_usage();
+                return 0;
+            } else if (argv[i][1] == 'o' || strcmp(&argv[i][1], "-out") == 0) {
+                if (i+1 >= argc) {
+                    LOG_ERROR("Expected output file after '-o'");
+                    return -1;
+                }
+
+                output = argv[++i];
+            } else {
+                LOG_ERROR("Unknown option '%s'", argv[i]);
+                return -1;
+            }
         } else {
             src = argv[i];
         }
@@ -244,6 +307,16 @@ int main(int argc, char *argv[])
     if (!src) {
         print_usage();
         return -1;
+    }
+
+    if (!output) {
+        i32 src_len = strlen(src);
+        output = (char*)malloc(src_len+3);
+        memcpy(output, src, src_len);
+
+        char *p = strrchr(output, '.');
+        if (!p) p = output + src_len;
+        memcpy(p, ".s", 3);
     }
 
     {
@@ -297,6 +370,10 @@ int main(int argc, char *argv[])
         }
 
         debug_print_ast(root.next);
+
+        StringBuilder sb = { .alloc = scratch };
+        emit_ast_x64(&sb, root.next);
+        write_file(string(output), &sb);
     }
 
     return 0;
