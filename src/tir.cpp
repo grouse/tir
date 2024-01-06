@@ -172,14 +172,6 @@ i32 operator_precedence(BinaryOp op)
     }
 }
 
-i32 operator_precedence(AST *ast)
-{
-    switch (ast->type) {
-    case AST_BINARY_OP: return operator_precedence(ast->binary_op.op);
-    default: return 0;
-    }
-}
-
 AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
 {
     AST *expr = nullptr;
