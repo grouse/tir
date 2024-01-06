@@ -2,5 +2,3 @@ main :: ()
 {
     return;
 }
-
-foobar :: () return;

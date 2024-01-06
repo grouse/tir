@@ -28,7 +28,6 @@ enum ASTType : i32 {
     AST_RETURN,
     AST_PROCEDURE,
     AST_LITERAL,
-    AST_STATEMENT_LIST,
     AST_BINARY_OP,
 };
 
@@ -63,9 +62,6 @@ struct AST {
             Token token;
         } literal;
         struct {
-            AST *stmts;
-        } stmt_list;
-        struct {
             Token token;
             AST *expr;
         } ret;
@@ -99,12 +95,6 @@ void debug_print_ast(AST *ast, i32 depth = 0)
         case AST_RETURN:
             LOG_INFO("%.*sreturn", depth, indent);
             if (ast->ret.expr) debug_print_ast(ast->ret.expr, depth+1);
-            break;
-        case AST_STATEMENT_LIST:
-            LOG_INFO("%.*sstatements", depth, indent);
-            for (AST *stmt = ast->stmt_list.stmts; stmt; stmt = stmt->next) {
-                debug_print_ast(stmt, depth+1);
-            }
             break;
         case AST_INVALID: break;
         }
@@ -191,14 +181,12 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
 AST* parse_statement(Lexer *lexer, Allocator mem)
 {
     if (optional_token(lexer, '{')) {
-        AST *ast = ALLOC_T(mem, AST) {
-            .type = AST_STATEMENT_LIST,
-        };
+        AST *ast = parse_statement(lexer, mem);
+        if (!ast) return nullptr;
 
-        AST **ptr = &ast->stmt_list.stmts;
         while (*lexer && peek_token(lexer) != '}') {
-            *ptr = parse_statement(lexer, mem);
-            if (*ptr) ptr = &(*ptr)->next;
+            ast->next = parse_statement(lexer, mem);
+            ast = ast->next;
         }
 
         if (!require_next_token(lexer, '}')) {
