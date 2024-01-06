@@ -109,41 +109,49 @@ Token eat_until(Lexer *lexer, TokenType terminator, u32 flags) EXPORT
     return t;
 }
 
-bool require_next_token(Lexer *lexer, TokenType type, Token *t) EXPORT
+bool require_next_token(Lexer *lexer, TokenType type, Token *t /*= nullptr */) EXPORT
 {
-    *t = next_token(lexer);
-    if (t->type != type && (type == TOKEN_NUMBER && t->type != TOKEN_INTEGER)) {
-        return false;
-    }
-    return true;
+    next_token(lexer);
+    if (t) *t = lexer->t;
+    if (lexer->t.type == type) return true;
+    if (lexer->t.type == TOKEN_INTEGER && type == TOKEN_NUMBER) return true;
+    return false;
 
 }
 
 bool require_next_token(Lexer *lexer, char c, Token *t /*= nullptr */) EXPORT
 {
     next_token(lexer);
-    if (lexer->t.type != (TokenType)c) return false;
+    if (t) *t = lexer->t;
+    if (lexer->t.type == (TokenType)c) return true;
+    return false;
+}
+
+bool optional_token(Lexer *lexer, TokenType type, Token *t /*= nullptr */) EXPORT
+{
+    Token lh = peek_token(lexer);
+    if (lh.type != type && (lh.type != TOKEN_INTEGER || type != TOKEN_NUMBER)) return false;
+
+    next_token(lexer);
     if (t) *t = lexer->t;
     return true;
 }
 
-bool optional_token(Lexer *lexer, TokenType type, Token *o_t /*= nullptr */) EXPORT
+bool optional_token(Lexer *lexer, char c, Token *t /*= nullptr */) EXPORT
 {
-    if (peek_token(lexer) == type) {
-        next_token(lexer);
-        if (o_t) *o_t = lexer->t;
-        return true;
-    }
+    Token lh = peek_token(lexer);
+    if (lh.type != (TokenType)c) return false;
 
-    return false;
+    next_token(lexer);
+    if (t) *t = lexer->t;
+    return true;
 }
-bool optional_token(Lexer *lexer, char c, Token *o_t /*= nullptr */) EXPORT { return optional_token(lexer, (TokenType)c, o_t); }
 
-bool optional_identifier(Lexer *lexer, String str, Token *o_t /*= nullptr */)
+bool optional_identifier(Lexer *lexer, String str, Token *t /*= nullptr */)
 {
     if (peek_token(lexer) == str) {
         next_token(lexer);
-        if (o_t) *o_t = lexer->t;
+        if (t) *t = lexer->t;
         return true;
     }
 
