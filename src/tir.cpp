@@ -36,9 +36,9 @@ enum BinaryOp : i8 {
     OP_INVALID = 0,
 
     OP_ADD,
-    // OP_SUB
-    // OP_MUL,
-    // OP_DIV,
+    OP_SUB,
+    OP_MUL,
+    OP_DIV,
     //
     // OP_AND,
     // OP_NAND,
@@ -60,6 +60,9 @@ const char* sz_from_enum(BinaryOp op)
 {
     switch (op) {
     case OP_ADD:     return "+";
+    case OP_SUB:     return "-";
+    case OP_MUL:     return "*";
+    case OP_DIV:     return "/";
     case OP_INVALID: return "invalid";
     }
 }
@@ -144,9 +147,12 @@ void debug_print_ast(AST *ast, i32 depth = 0)
     }
 }
 
-BinaryOp optional_parse_binary_op(Lexer *lexer)
+BinaryOp binary_op_from_token(Token t)
 {
-    if (optional_token(lexer, '+')) return OP_ADD;
+    if (t.type == '+') return OP_ADD;
+    if (t.type == '-') return OP_SUB;
+    if (t.type == '*') return OP_MUL;
+    if (t.type == '/') return OP_DIV;
     return OP_INVALID;
 }
 
@@ -155,7 +161,26 @@ UnaryOp optional_parse_unary_op(Lexer *)
     return UOP_INVALID;
 }
 
-AST* parse_subexpression(Lexer *lexer, Allocator mem)
+i32 operator_precedence(BinaryOp op)
+{
+    switch (op) {
+    case OP_ADD: return 10;
+    case OP_SUB: return 10;
+    case OP_MUL: return 20;
+    case OP_DIV: return 20;
+    default: return 0;
+    }
+}
+
+i32 operator_precedence(AST *ast)
+{
+    switch (ast->type) {
+    case AST_BINARY_OP: return operator_precedence(ast->binary_op.op);
+    default: return 0;
+    }
+}
+
+AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
 {
     AST *expr = nullptr;
     if (optional_token(lexer, TOKEN_INTEGER)) {
@@ -163,13 +188,25 @@ AST* parse_subexpression(Lexer *lexer, Allocator mem)
             .type = AST_LITERAL,
             .literal.token = lexer->t,
         };
-    } else {
-        return nullptr;
     }
+    // else if (UnaryOp op = optional_parse_unary_op(lexer); op) {
+    //     expr = ALLOC_T(mem, AST) {
+    //         .type = AST_UNARY_OP,
+    //         .unary_op.op = op,
+    //         .unary_op.expr = parse_prim_expression(lexer, mem),
+    //     };
+    // }
 
-    if (BinaryOp op = optional_parse_binary_op(lexer); op) {
+    while (*lexer) {
+        BinaryOp op = binary_op_from_token(peek_token(lexer));
+        if (!op) break;
+
+        i32 prec = operator_precedence(op);
+        if (prec < min_prec) break;
+        next_token(lexer);
+
         AST *lhs = expr;
-        AST *rhs = parse_subexpression(lexer, mem);
+        AST *rhs = parse_expression(lexer, mem, prec+1);
 
         expr = ALLOC_T(mem, AST) {
             .type = AST_BINARY_OP,
@@ -177,23 +214,9 @@ AST* parse_subexpression(Lexer *lexer, Allocator mem)
             .binary_op.lhs = lhs,
             .binary_op.rhs = rhs,
         };
-    } else if (Token t = peek_token(lexer); t != ';') {
-        PARSE_ERROR(lexer, "unknown operator in expression '%.*s'", STRFMT(t.str));
-        return nullptr;
     }
 
     return expr;
-}
-
-AST* parse_expression(Lexer *lexer, Allocator mem)
-{
-    AST *ast = parse_subexpression(lexer, mem);
-    if (!require_next_token(lexer, ';')) {
-        PARSE_ERROR(lexer, "unclosed expression");
-        return nullptr;
-    }
-
-    return ast;
 }
 
 AST* parse_statement(Lexer *lexer, Allocator mem)
@@ -226,6 +249,11 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
                     .type = AST_RETURN,
                     .ret.expr = parse_expression(lexer, mem)
                 };
+
+                if (!require_next_token(lexer, ';')) {
+                    PARSE_ERROR(lexer, "expected ';' after return statement");
+                    return nullptr;
+                }
                 break;
             }
 
