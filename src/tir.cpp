@@ -239,32 +239,6 @@ AST* parse_proc_decl(Lexer *lexer, Allocator mem)
     return nullptr;
 }
 
-void emit_ast_x64(StringBuilder *sb, AST *ast);
-
-void emit_ast_x64_mov(StringBuilder *sb, String dst, AST *src)
-{
-    if (src->type == AST_LITERAL) {
-        append_stringf(sb, "mov %.*s, %.*s\n", STRFMT(dst), STRFMT(src->literal.token.str));
-    } else if (src->type == AST_BINARY_OP) {
-        emit_ast_x64(sb, src->binary_op.lhs);
-        append_stringf(sb, "push eax\n");
-        emit_ast_x64(sb, src->binary_op.rhs);
-        append_stringf(sb, "pop ebx\n");
-
-        switch (src->binary_op.op.type) {
-        case '+': append_stringf(sb, "add eax, ebx\n"); break;
-        case '-': append_stringf(sb, "sub eax, ebx\n"); break;
-        case '*': append_stringf(sb, "imul eax, ebx\n"); break;
-        case '/': append_stringf(sb, "idiv ebx\n"); break;
-        default: LOG_ERROR("Invalid binary op '%.*s'", STRFMT(src->binary_op.op.str)); break;
-        }
-
-        if (dst != "eax") append_stringf(sb, "mov %.*s, eax\n", STRFMT(dst));
-    } else {
-        LOG_ERROR("Invalid AST node type '%d'", src->type);
-    }
-}
-
 void emit_ast_x64(StringBuilder *sb, AST *ast)
 {
     while (ast) {
@@ -277,10 +251,22 @@ void emit_ast_x64(StringBuilder *sb, AST *ast)
             emit_ast_x64(sb, ast->proc.body);
             break;
         case AST_BINARY_OP:
-            emit_ast_x64_mov(sb, "eax", ast);
+            emit_ast_x64(sb, ast->binary_op.lhs);
+            append_stringf(sb, "push eax\n");
+            emit_ast_x64(sb, ast->binary_op.rhs);
+            append_stringf(sb, "pop ebx\n");
+
+            switch (ast->binary_op.op.type) {
+            case '+': append_stringf(sb, "add eax, ebx\n"); break;
+            case '-': append_stringf(sb, "sub eax, ebx\n"); break;
+            case '*': append_stringf(sb, "imul eax, ebx\n"); break;
+            case '/': append_stringf(sb, "idiv ebx\n"); break;
+            default: LOG_ERROR("Invalid binary op '%.*s'", STRFMT(ast->binary_op.op.str)); break;
+            }
+
             break;
         case AST_RETURN:
-            if (ast->ret.expr) emit_ast_x64_mov(sb, "eax", ast->ret.expr);
+            if (ast->ret.expr) emit_ast_x64(sb, ast->ret.expr);
             append_stringf(sb, "ret\n");
             break;
         default: LOG_ERROR("Invalid AST node type '%d'", ast->type); break;
