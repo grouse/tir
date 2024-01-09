@@ -362,6 +362,7 @@ int main(int argc, char *argv[])
         debug_print_ast(root.next);
 
         StringBuilder sb = { .alloc = scratch };
+        append_string(&sb, ".globl main\n");
         emit_ast_x64(&sb, root.next);
         write_file(string(output), &sb);
     }
