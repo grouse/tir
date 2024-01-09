@@ -59,6 +59,8 @@ struct AST {
 };
 
 struct Module {
+    AST *ast;
+
     DynamicArray<AST*> procedures;
 };
 
@@ -142,11 +144,11 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
         if (!is_binary_op(op)) break;
 
         i32 prec = operator_precedence(op);
-        if (prec < min_prec) break;
+        if (prec <= min_prec) break;
         next_token(lexer);
 
         AST *lhs = expr;
-        AST *rhs = parse_expression(lexer, mem, prec+1);
+        AST *rhs = parse_expression(lexer, mem, prec);
 
         expr = ALLOC_T(mem, AST) {
             .type = AST_BINARY_OP,
@@ -340,32 +342,29 @@ int main(int argc, char *argv[])
         }
 
         Allocator mem = tl_linear_allocator(MAX_AST_MEM);
-
-        Module global{};
-
-        AST root{};
-        AST *ast = &root;
-
         Lexer lexer{ f.data, f.size, file };
 
+        Module global{};
+        AST **ptr = &global.ast;
         while (next_token(&lexer)) {
             if (AST *proc = parse_proc_decl(&lexer, mem); proc) {
                 array_add(&global.procedures, proc);
-                ast = ast->next = proc;
+                (*ptr) = proc;
+                ptr = &proc->next;
             } else {
                 PARSE_ERROR(&lexer, "unknown declaration in global scope");
                 return -1;
             }
         }
 
-        debug_print_ast(root.next);
+        debug_print_ast(global.ast);
 
         StringBuilder sb = { .alloc = scratch };
         for (auto *decl : global.procedures) {
             append_stringf(&sb, ".globl %.*s\n", STRFMT(decl->proc.identifier.str));
         }
 
-        emit_ast_x64(&sb, root.next);
+        emit_ast_x64(&sb, global.ast);
         write_file(string(output), &sb);
     }
 
