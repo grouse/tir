@@ -58,6 +58,10 @@ struct AST {
     };
 };
 
+struct Module {
+    DynamicArray<AST*> procedures;
+};
+
 Keyword keyword_from_string(String str)
 {
     if (str == "return") return KW_RETURN;
@@ -201,6 +205,40 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
     return nullptr;
 }
 
+AST* parse_proc_decl(Lexer *lexer, Allocator mem)
+{
+    if (lexer->t.type != TOKEN_IDENTIFIER) return nullptr;
+    Token identifier = lexer->t;
+
+    // TODO(jesper): this meains `main :\s*: ()` is valid syntax, should it be?
+    if (peek_token(lexer) == ':' &&
+        peek_nth_token(lexer, 2) == ':')
+    {
+        if (peek_nth_token(lexer, 3) == '(') {
+            next_nth_token(lexer, 3);
+
+            if (!require_next_token(lexer, ')')) {
+                PARSE_ERROR(lexer, "expected ')'");
+                return nullptr;
+            }
+
+            AST *body = parse_statement(lexer, mem);
+            if (!body) {
+                PARSE_ERROR(lexer, "expected statement after procedure declaration");
+                return nullptr;
+            }
+
+            return ALLOC_T(mem, AST) {
+                .type = AST_PROCEDURE,
+                .proc.identifier = identifier,
+                .proc.body = body,
+            };
+        }
+    }
+
+    return nullptr;
+}
+
 void emit_ast_x64(StringBuilder *sb, AST *ast);
 
 void emit_ast_x64_mov(StringBuilder *sb, String dst, AST *src)
@@ -317,44 +355,19 @@ int main(int argc, char *argv[])
 
         Allocator mem = tl_linear_allocator(MAX_AST_MEM);
 
+        Module global{};
+
         AST root{};
         AST *ast = &root;
 
         Lexer lexer{ f.data, f.size, file };
 
         while (next_token(&lexer)) {
-            if (lexer.t.type == TOKEN_IDENTIFIER) {
-                Token identifier = lexer.t;
-
-                if (i32 kw = keyword_from_string(identifier.str); kw != KW_INVALID) {
-                    switch (kw) {
-                    case KW_RETURN:
-                        PARSE_ERROR(&lexer, "unexpected return statement");
-                        break;
-                    }
-                } else if (peek_token(&lexer) == ':' &&
-                           peek_nth_token(&lexer, 2) == ':')
-                {
-                    if (peek_nth_token(&lexer, 3) == '(') {
-                        next_nth_token(&lexer, 3);
-
-                        if (!require_next_token(&lexer, ')')) {
-                            PARSE_ERROR(&lexer, "expected ')'");
-                            break;
-                        }
-
-                        ast = ast->next = ALLOC_T(mem, AST) {
-                            .type = AST_PROCEDURE,
-                            .proc.identifier = identifier,
-                            .proc.body = parse_statement(&lexer, mem),
-                        };
-                    }
-                } else {
-                    PARSE_ERROR(&lexer, "unexpected identifier '%.*s'", STRFMT(identifier.str));
-                    return -1;
-                }
+            if (AST *proc = parse_proc_decl(&lexer, mem); proc) {
+                array_add(&global.procedures, proc);
+                ast = ast->next = proc;
             } else {
-                PARSE_ERROR(&lexer, "unknown token '%.*s'", STRFMT(lexer.t.str));
+                PARSE_ERROR(&lexer, "unknown declaration in global scope");
                 return -1;
             }
         }
@@ -362,7 +375,10 @@ int main(int argc, char *argv[])
         debug_print_ast(root.next);
 
         StringBuilder sb = { .alloc = scratch };
-        append_string(&sb, ".globl main\n");
+        for (auto *decl : global.procedures) {
+            append_stringf(&sb, ".globl %.*s\n", STRFMT(decl->proc.identifier.str));
+        }
+
         emit_ast_x64(&sb, root.next);
         write_file(string(output), &sb);
     }
