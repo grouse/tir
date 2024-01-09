@@ -50,6 +50,7 @@ Token next_token(Lexer *lexer, u32 flags) EXPORT
             return t;
         } else if ((*lexer->ptr >= 'a' && *lexer->ptr <= 'z') ||
                    (*lexer->ptr >= 'A' && *lexer->ptr <= 'Z') ||
+                    lexer->ptr[0] == '_' ||
                    (u8)(*lexer->ptr) > 127)
         {
             t.type = TOKEN_IDENTIFIER;
