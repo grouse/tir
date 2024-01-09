@@ -353,6 +353,9 @@ int main(int argc, char *argv[])
                     PARSE_ERROR(&lexer, "unexpected identifier '%.*s'", STRFMT(identifier.str));
                     return -1;
                 }
+            } else {
+                PARSE_ERROR(&lexer, "unknown token '%.*s'", STRFMT(lexer.t.str));
+                return -1;
             }
         }
 
