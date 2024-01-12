@@ -6,9 +6,9 @@
 #include "win32_process.cpp"
 #endif
 
-int run_process(String exe, char *argv[], ProcessOpts opts)
+int run_process(String exe, Array<String> args, ProcessOpts opts)
 {
-    Process *p = create_process(exe, argv, opts);
+    Process *p = create_process(exe, args, opts);
     if (!p) return false;
 
     int exit_code = 0;

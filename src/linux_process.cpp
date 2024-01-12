@@ -13,7 +13,7 @@ struct Process {
 
 Process* create_process(
     String exe,
-    char *argv[],
+    Array<String> args,
     ProcessOpts /*opts*/)
 {
     SArena scratch = tl_scratch_arena();
@@ -32,12 +32,13 @@ Process* create_process(
         return nullptr;
     }
 
-    for (auto p = &argv[0]; *p; p++) {
-        LOG_INFO("argv[%d] = '%s'", (int)(p - argv), *p);
-    }
+    Array<char*> argv; array_create(&argv, args.count+2, scratch);
+    argv[0] = sz_exe;
+    for (auto it : iterator(args)) argv[it.index+1] = sz_string(it, scratch);
+    *array_tail(argv) = nullptr;
 
     int pid;
-    int result = posix_spawnp(&pid, sz_exe, &actions, &attr, argv, NULL);
+    int result = posix_spawnp(&pid, sz_exe, &actions, &attr, argv.data, NULL);
     if (result != 0) {
         LOG_ERROR("posix_spawn exe: '%s': %s", sz_exe, strerror(errno));
     }

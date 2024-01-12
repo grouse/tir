@@ -298,7 +298,7 @@ int main(int argc, char *argv[])
 
     char *src = nullptr;
     char *output_name = nullptr;
-    char *output_abs_name = nullptr;
+    char *output_abs_path = nullptr;
 
     for (i32 i = 0; i < argc; i++) {
         if (argv[i][0] == '-') {
@@ -333,12 +333,11 @@ int main(int argc, char *argv[])
         output_name = (char*)malloc(src_len + 1);
         strcpy(output_name, src);
 
-        String s_output_abs = absolute_path(string(output_name), scratch);
-        output_abs_name = sz_string(s_output_abs, mem_dynamic);
-
         if (char *p = strrchr(output_name, '/'); p) output_name = p+1;
         if (char *p = strrchr(output_name, '.'); p) *p = '\0';
-        if (char *p = strrchr(output_abs_name, '.'); p) *p = '\0';
+
+        String s_output_abs = absolute_path("./", scratch);
+        output_abs_path = sz_string(s_output_abs, mem_dynamic);
     }
 
     Module global{};
@@ -381,17 +380,15 @@ int main(int argc, char *argv[])
         write_file(stringf(scratch, "%s.s", output_name), &sb);
     }
 
-    // {
-    //     SArena scratch = tl_scratch_arena();
-    //
-    //     char *argv[] = {
-    //         "clang",
-    //         sztringf(scratch, "%s.s", output_abs_name),
-    //         (char*)"-o", sztringf(scratch, "%s.o", output_abs_name),
-    //         NULL
-    //     };
-    //     run_process("clang", argv);
-    // }
+    {
+        SArena scratch = tl_scratch_arena();
+
+        run_process("clang", {
+            "-masm=intel",
+            stringf(scratch, "%s/%s.s", output_abs_path, output_name),
+            "-o", stringf(scratch, "%s/%s.o", output_abs_path, output_name),
+        });
+    }
 
     return 0;
 }
