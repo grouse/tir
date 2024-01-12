@@ -1127,6 +1127,7 @@ bool generate_header(const char *out_path, const char *src_path, CXTranslationUn
                 for (auto constant : enum_decl->constants) {
                     fprintf(f.flecs_h, "\t{\tecs_entity_desc_t desc = { .name = \"%s\" };\n", constant->name);
                     fprintf(f.flecs_h, "\t\tecs_entity_t c = ecs_entity_init(ecs, &desc);\n");
+                    fprintf(f.flecs_h, "\t\tecs_add(ecs, c, EcsEnum);\n");
                     fprintf(f.flecs_h, "\t\tecs_i32_t v = %lld;\n", constant->value);
                     fprintf(f.flecs_h, "\t\tecs_set_id(ecs, c, ecs_pair(EcsConstant, ecs_id(ecs_i32_t)), sizeof v, &v);\n");
                     fprintf(f.flecs_h, "\t}\n");

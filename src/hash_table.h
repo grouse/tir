@@ -177,6 +177,10 @@ V* map_find_emplace(HashTable<K, V> *table, K key, V emp_value)
 }
 
 
+// string specializations
+template<typename V>
+void map_set(HashTable<String, V> *table, const char *key, V value) { return map_set(table, string(key), value); }
+
 template<typename V>
 V* map_find(HashTable<String, V> *table, String key)
 {

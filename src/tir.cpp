@@ -4,7 +4,7 @@
 #include "lexer.h"
 #include "process.h"
 
-#include "gen/string.h"
+#include "string.h"
 
 #include <cstdlib>
 #include <stdio.h>
