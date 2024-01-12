@@ -9,7 +9,7 @@ extern "C" char* strerror(int errnum) NOTHROW;
 
 #define typeid(T) type_id<T>(#T)
 #define defer auto defer_( __LINE__ ) = DeferDummy( ) + [&]( )
-
+#define transmute(T, value) (*(T*)&(value))
 
 #define CAT_(a, b) a ## b
 #define CAT(a, b) CAT_(a, b)
