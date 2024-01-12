@@ -74,6 +74,22 @@ String stringf(Allocator mem, const char *fmt, ...)
     return result;
 }
 
+char* sztringf(Allocator mem, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    i32 length = vsnprintf(nullptr, 0, fmt, args);
+    va_end(args);
+
+    va_start(args, fmt);
+    char *result = (char*)ALLOC(mem, length+1);
+    vsnprintf(result, length+1, fmt, args);
+    va_end(args);
+
+    return result;
+}
+
+
 String slice(String str, i32 start, i32 end)
 {
     String r;

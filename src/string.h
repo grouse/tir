@@ -78,6 +78,8 @@ bool is_number(i32 c);
 String stringf(char *buffer, i32 size, const char *fmt, ...);
 String stringf(Allocator mem, const char *fmt, ...);
 
+char* sztringf(Allocator mem, const char *fmt, ...);
+
 i32 i32_from_string(String s);
 bool i32_from_string(String s, i32 *dst);
 bool f32_from_string(String s, f32 *dst);
@@ -116,6 +118,8 @@ void append_string(StringBuilder *sb, String str);
 void append_stringf(StringBuilder *sb, const char *fmt, ...);
 
 bool parse_cmd_argument(String *args, i32 count, String name, i32 values[2]);
+
+#include "gen/string.h"
 
 #if defined(_WIN32)
 wchar_t* wsz_string(String str, Allocator mem);
