@@ -56,6 +56,8 @@ struct StringBuilder {
     Block *current = &head;
 };
 
+#include "gen/string.h"
+
 bool operator!=(String lhs, String rhs);
 bool operator==(String lhs, String rhs);
 
@@ -63,9 +65,7 @@ bool starts_with(String lhs, String rhs);
 bool starts_with(const char *lhs, const char *rhs);
 bool ends_with(String lhs, String rhs);
 
-String create_string(StringBuilder *sb, Allocator mem);
-String create_string(const char *str, i32 length, Allocator mem);
-inline String create_string(const char *sz_str, Allocator mem) { return create_string(sz_str, (i32)strlen(sz_str), mem); }
+inline String string(const char *sz_str, Allocator mem) { return string(sz_str, (i32)strlen(sz_str), mem); }
 String duplicate_string(String other, Allocator mem);
 void string_copy(String *dst, String src, Allocator mem);
 
@@ -119,7 +119,6 @@ void append_stringf(StringBuilder *sb, const char *fmt, ...);
 
 bool parse_cmd_argument(String *args, i32 count, String name, i32 values[2]);
 
-#include "gen/string.h"
 
 #if defined(_WIN32)
 wchar_t* wsz_string(String str, Allocator mem);

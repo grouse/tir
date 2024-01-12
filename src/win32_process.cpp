@@ -28,7 +28,7 @@ Process* create_process(String exe, Array<String> args, ProcessOpts opts)
         if (i < args.count-1) append_string(&sb, " ");
     }
 
-    String s_args = create_string(&sb, scratch);
+    String s_args = string(&sb, scratch);
     wchar_t *wsz_exe = wsz_string(exe, scratch);
     wchar_t *wsz_args = wsz_string(s_args, scratch);
 

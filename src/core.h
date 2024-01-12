@@ -182,7 +182,7 @@ inline String read_memory(MemoryBuffer *buf, Allocator mem)
     i32 length = read_memory<i32>(buf);
     if (length > 0) {
         char* data = (char*)read_memory(buf, length);
-        return create_string(data, length, mem);
+        return string(data, length, mem);
     }
 
     return {};

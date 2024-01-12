@@ -15,7 +15,7 @@ bool operator==(String lhs, String rhs)
     return lhs.length == rhs.length && memcmp(lhs.data, rhs.data, lhs.length) == 0;
 }
 
-String create_string(const char *str, i32 length, Allocator mem)
+String string(const char *str, i32 length, Allocator mem) EXPORT
 {
     String s;
     s.data = (char*)ALLOC(mem, length);
@@ -884,7 +884,7 @@ void reset_string_builder(StringBuilder *sb)
     sb->current = &sb->head;
 }
 
-String create_string(StringBuilder *sb, Allocator mem)
+String string(StringBuilder *sb, Allocator mem) EXPORT
 {
     i32 length = 0;
     for (auto it = sb->current; it; it = it->next) {
@@ -902,6 +902,25 @@ String create_string(StringBuilder *sb, Allocator mem)
         memcpy(ptr, it->data, it->written);
     }
 
+    return str;
+}
+
+char* sz_string(StringBuilder *sb, Allocator mem) EXPORT
+{
+    i32 length = 0;
+    for (auto it = sb->current; it; it = it->next) {
+        if (it->written == 0) break;
+        length += it->written;
+    }
+
+    char *str = (char*)ALLOC(mem, length+1);
+    char *ptr = str;
+    for (auto it = sb->current; it; it = it->next) {
+        if (it->written == 0) break;
+        memcpy(ptr, it->data, it->written);
+    }
+
+    str[length] = '\0';
     return str;
 }
 
