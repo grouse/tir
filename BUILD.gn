@@ -8,6 +8,7 @@ executable("tir") {
         "src/lexer.cpp",
         "src/memory.cpp",
         "src/string.cpp",
+        "src/process.cpp",
     ]
 
     include_dirs = [
@@ -19,7 +20,7 @@ executable("tir") {
         sources += [
             "src/win32_file.cpp",
             "src/win32_memory.cpp",
-            "src/win32_thread.cpp"
+            "src/win32_thread.cpp",
         ]
 
         libs += ["user32", "shell32", "gdi32", "shlwapi"]

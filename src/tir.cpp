@@ -2,6 +2,9 @@
 #include "memory.h"
 #include "file.h"
 #include "lexer.h"
+#include "process.h"
+
+#include "gen/string.h"
 
 #include <cstdlib>
 #include <stdio.h>
@@ -294,7 +297,8 @@ int main(int argc, char *argv[])
     init_default_allocators();
 
     char *src = nullptr;
-    char *output = nullptr;
+    char *output_name = nullptr;
+    char *output_abs_name = nullptr;
 
     for (i32 i = 0; i < argc; i++) {
         if (argv[i][0] == '-') {
@@ -307,7 +311,7 @@ int main(int argc, char *argv[])
                     return -1;
                 }
 
-                output = argv[++i];
+                output_name = argv[++i];
             } else {
                 LOG_ERROR("Unknown option '%s'", argv[i]);
                 return -1;
@@ -322,19 +326,26 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    if (!output) {
-        i32 src_len = strlen(src);
-        output = (char*)malloc(src_len+3);
-        memcpy(output, src, src_len);
+    if (!output_name) {
+        SArena scratch = tl_scratch_arena();
 
-        char *p = strrchr(output, '.');
-        if (!p) p = output + src_len;
-        memcpy(p, ".s", 3);
+        i32 src_len = strlen(src);
+        output_name = (char*)malloc(src_len + 1);
+        strcpy(output_name, src);
+
+        String s_output_abs = absolute_path(string(output_name), scratch);
+        output_abs_name = sz_string(s_output_abs, mem_dynamic);
+
+        if (char *p = strrchr(output_name, '/'); p) output_name = p+1;
+        if (char *p = strrchr(output_name, '.'); p) *p = '\0';
+        if (char *p = strrchr(output_abs_name, '.'); p) *p = '\0';
     }
 
+    Module global{};
     {
-        String file = string(src);
         SArena scratch = tl_scratch_arena();
+
+        String file = string(src);
         FileInfo f = read_file(file, scratch);
         if (!f.data) {
             LOG_ERROR("Failed to read file '%.*s'", STRFMT(file));
@@ -344,7 +355,6 @@ int main(int argc, char *argv[])
         Allocator mem = tl_linear_allocator(MAX_AST_MEM);
         Lexer lexer{ f.data, f.size, file };
 
-        Module global{};
         AST **ptr = &global.ast;
         while (next_token(&lexer)) {
             if (AST *proc = parse_proc_decl(&lexer, mem); proc) {
@@ -358,15 +368,30 @@ int main(int argc, char *argv[])
         }
 
         debug_print_ast(global.ast);
+    }
 
+    {
+        SArena scratch = tl_scratch_arena();
         StringBuilder sb = { .alloc = scratch };
         for (auto *decl : global.procedures) {
             append_stringf(&sb, ".globl %.*s\n", STRFMT(decl->proc.identifier.str));
         }
 
         emit_ast_x64(&sb, global.ast);
-        write_file(string(output), &sb);
+        write_file(stringf(scratch, "%s.s", output_name), &sb);
     }
+
+    // {
+    //     SArena scratch = tl_scratch_arena();
+    //
+    //     char *argv[] = {
+    //         "clang",
+    //         sztringf(scratch, "%s.s", output_abs_name),
+    //         (char*)"-o", sztringf(scratch, "%s.o", output_abs_name),
+    //         NULL
+    //     };
+    //     run_process("clang", argv);
+    // }
 
     return 0;
 }
