@@ -12,22 +12,25 @@ struct Process {
     StdOutProc stdout_proc;
 };
 
-Process* create_process(String exe, String args, ProcessOpts opts)
+Process* create_process(String exe, Array<String> args, ProcessOpts opts)
 {
     SArena scratch = tl_scratch_arena();
     Process *p = ALLOC_T(mem_dynamic, Process);
 
+    StringBuilder sb{ .alloc = scratch };
     if (extension_of(exe) == ".bat") {
-        if (args.length > 0) {
-            args = stringf(scratch, "/c %.*s %.*s", STRFMT(exe), STRFMT(args));
-        } else {
-            args = stringf(scratch, "/c %.*s", STRFMT(exe));
-        }
+        append_string(&sb, "/c");
         exe = "c:\\windows\\system32\\cmd.exe";
     }
 
+    for (i32 i = 0; i < args.count; i++) {
+        append_string(&sb, args[i]);
+        if (i < args.count-1) append_string(&sb, " ");
+    }
+
+    String s_args = create_string(&sb, scratch);
     wchar_t *wsz_exe = wsz_string(exe, scratch);
-    wchar_t *wsz_args = wsz_string(args, scratch);
+    wchar_t *wsz_args = wsz_string(s_args, scratch);
 
     HANDLE stdout_wr = NULL;
     defer { if (stdout_wr) CloseHandle(stdout_wr); };
