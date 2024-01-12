@@ -2,7 +2,6 @@
 
 #include <cctype>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
 #include <errno.h>
 
@@ -10,10 +9,19 @@
 
 #include <filesystem>
 
-#ifdef _WIN32
+#if defined(_WIN32)
+#define NOTHROW
+
 #undef strdup
 #define strdup _strdup
+#elif defined(__linux__)
+#define NOTHROW __attribute__(( __nothrow__ __LEAF))
 #endif
+
+extern "C" char* strerror(int errnum) NOTHROW;
+extern "C" int strcmp(const char * str1, const char * str2) NOTHROW;
+extern "C" char* strdup(const char *str1 ) NOTHROW;
+extern "C" size_t strlen(const char * str) NOTHROW;
 
 #define RMOV(...) static_cast<std::remove_reference_t<decltype(__VA_ARGS__)>&&>(__VA_ARGS__)
 #define RFWD(...) static_cast<decltype(__VA_ARGS__)&&>(__VA_ARGS__)
