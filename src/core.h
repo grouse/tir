@@ -5,6 +5,7 @@
 #include "platform.h"
 
 extern "C" void exit(int status) NOTHROW;
+extern "C" char* strerror(int errnum) NOTHROW;
 
 #define typeid(T) type_id<T>(#T)
 #define defer auto defer_( __LINE__ ) = DeferDummy( ) + [&]( )
