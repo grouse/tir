@@ -280,12 +280,22 @@ void emit_ast_x64(StringBuilder *sb, AST *ast)
     }
 }
 
+enum OutputType : i32 {
+    OUTPUT_EXECUTABLE,
+    OUTPUT_OBJECT,
+};
+
+struct {
+    OutputType out_type;
+} opts;
+
 void print_usage()
 {
     printf("Usage: tir <file> [options]\n");
     printf("Options:\n");
     printf("  -h, --help  Print this message\n");
     printf("  -o <file>   Output file\n");
+    printf("  -c          Output object file\n");
     printf("\n");
 }
 
@@ -315,6 +325,8 @@ int main(int argc, char *argv[])
                 }
 
                 out = argv[++i];
+            } else if (argv[i][1] == 'c') {
+                opts.out_type = OUTPUT_OBJECT;
             } else {
                 LOG_ERROR("Unknown option '%s'", argv[i]);
                 return -1;
@@ -333,7 +345,12 @@ int main(int argc, char *argv[])
     if (char *p = strrchr(src_name, '/'); p) src_name = p+1;
     if (char *p = strrchr(src_name, '.'); p) *p = '\0';
 
-    if (!out) out = sztringf(mem_dynamic, "./%s.o", src_name);
+    if (!out) {
+        if (opts.out_type == OUTPUT_EXECUTABLE)
+            out = sztringf(mem_dynamic, "./%s", src_name);
+        else
+            out = sztringf(mem_dynamic, "./%s.o", src_name);
+    }
 
     out_name = strdup(out);
     if (char *p = strrchr(out_name, '/'); p) out_name = p+1;
@@ -391,6 +408,14 @@ int main(int argc, char *argv[])
             stringf(scratch, "%s/%s.s", out_dir, out_name),
             "-o", stringf(scratch, "%s/%s.o", out_dir, out_name),
         });
+
+        if (opts.out_type == OUTPUT_EXECUTABLE) {
+            run_process("ld.lld", {
+                stringf(scratch, "%s/%s.o", out_dir, out_name),
+                "--entry", "_start",
+                "-o", stringf(scratch, "%s/%s", out_dir, out_name),
+            });
+        }
     }
 
     return 0;
