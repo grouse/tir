@@ -63,6 +63,7 @@ struct AST {
 
 struct Module {
     AST *ast;
+    AST *entry;
 
     DynamicArray<AST*> procedures;
 };
@@ -249,7 +250,7 @@ void emit_ast_x64(StringBuilder *sb, AST *ast)
     while (ast) {
         switch (ast->type) {
         case AST_LITERAL:
-            append_stringf(sb, "mov eax, %.*s\n", STRFMT(ast->literal.token.str));
+            append_stringf(sb, "  mov eax, %.*s\n", STRFMT(ast->literal.token.str));
             break;
         case AST_PROCEDURE:
             append_stringf(sb, "%.*s:\n", STRFMT(ast->proc.identifier.str));
@@ -257,22 +258,22 @@ void emit_ast_x64(StringBuilder *sb, AST *ast)
             break;
         case AST_BINARY_OP:
             emit_ast_x64(sb, ast->binary_op.lhs);
-            append_stringf(sb, "push eax\n");
+            append_stringf(sb, "  push eax\n");
             emit_ast_x64(sb, ast->binary_op.rhs);
-            append_stringf(sb, "pop ebx\n");
+            append_stringf(sb, "  pop ebx\n");
 
             switch (ast->binary_op.op.type) {
-            case '+': append_stringf(sb, "add eax, ebx\n"); break;
-            case '-': append_stringf(sb, "sub eax, ebx\n"); break;
-            case '*': append_stringf(sb, "imul eax, ebx\n"); break;
-            case '/': append_stringf(sb, "idiv ebx\n"); break;
+            case '+': append_stringf(sb, "  add eax, ebx\n"); break;
+            case '-': append_stringf(sb, "  sub eax, ebx\n"); break;
+            case '*': append_stringf(sb, "  imul eax, ebx\n"); break;
+            case '/': append_stringf(sb, "  idiv ebx\n"); break;
             default: LOG_ERROR("Invalid binary op '%.*s'", STRFMT(ast->binary_op.op.str)); break;
             }
 
             break;
         case AST_RETURN:
             if (ast->ret.expr) emit_ast_x64(sb, ast->ret.expr);
-            append_stringf(sb, "ret\n");
+            append_stringf(sb, "  ret\n");
             break;
         default: LOG_ERROR("Invalid AST node type '%d'", ast->type); break;
         }
@@ -379,6 +380,8 @@ int main(int argc, char *argv[])
                 array_add(&global.procedures, proc);
                 (*ptr) = proc;
                 ptr = &proc->next;
+
+                if (proc->proc.identifier == "main") global.entry = proc;
             } else {
                 PARSE_ERROR(&lexer, "unknown declaration in global scope");
                 return -1;
@@ -391,9 +394,22 @@ int main(int argc, char *argv[])
     {
         SArena scratch = tl_scratch_arena();
         StringBuilder sb = { .alloc = scratch };
+
+        append_stringf(&sb, ".intel_syntax noprefix\n");
+        append_stringf(&sb, ".globl _start\n");
+
         for (auto *decl : global.procedures) {
             append_stringf(&sb, ".globl %.*s\n", STRFMT(decl->proc.identifier.str));
         }
+
+        if (global.entry) {
+            append_string(&sb, "_start:\n");
+            append_stringf(&sb, "  call %.*s\n", STRFMT(global.entry->proc.identifier.str));
+            append_string(&sb, "  mov ebx, eax\n");
+            append_string(&sb, "  mov eax, 1\n");
+            append_string(&sb, "  int 0x80\n");
+        }
+
 
         emit_ast_x64(&sb, global.ast);
         write_file(stringf(scratch, "%s/%s.s", out_dir, out_name), &sb);
