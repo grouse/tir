@@ -37,6 +37,9 @@ Process* create_process(
     for (auto it : iterator(args)) argv[it.index+1] = sz_string(it, scratch);
     *array_tail(argv) = nullptr;
 
+    LOG_INFO("spawning '%s'", sz_exe);
+    //for (auto it : iterator(argv)) LOG_INFO("  argv[%d] = '%s'", it.index, argv[it.index]);
+
     int pid;
     int result = posix_spawnp(&pid, sz_exe, &actions, &attr, argv.data, NULL);
     if (result != 0) {
