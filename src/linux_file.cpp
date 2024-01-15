@@ -195,7 +195,7 @@ String absolute_path(String relative, Allocator mem)
     char *rl_path = realpath(sz_path, nullptr);
     if (!rl_path) return {};
 
-    String r = create_string(rl_path, mem);
+    String r = string(rl_path, mem);
     free(rl_path);
     return r;
 }
@@ -225,7 +225,7 @@ String get_working_dir(Allocator mem)
 	char *wd = getcwd(buffer, sizeof buffer);
 	PANIC_IF(wd == nullptr, "current working dir exceeds PATH_MAX");
 
-	return create_string(wd, (i32)strlen(wd), mem);
+	return string(wd, (i32)strlen(wd), mem);
 }
 
 void set_working_dir(String path)
