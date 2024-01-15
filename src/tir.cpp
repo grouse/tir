@@ -297,8 +297,11 @@ int main(int argc, char *argv[])
     init_default_allocators();
 
     char *src = nullptr;
-    char *output_name = nullptr;
-    char *output_abs_path = nullptr;
+    char *out = nullptr;
+
+    char *src_name    = nullptr;
+    char *out_name    = nullptr;
+    char *out_dir     = nullptr;
 
     for (i32 i = 0; i < argc; i++) {
         if (argv[i][0] == '-') {
@@ -311,7 +314,7 @@ int main(int argc, char *argv[])
                     return -1;
                 }
 
-                output_name = argv[++i];
+                out = argv[++i];
             } else {
                 LOG_ERROR("Unknown option '%s'", argv[i]);
                 return -1;
@@ -326,19 +329,18 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    if (!output_name) {
-        SArena scratch = tl_scratch_arena();
+    src_name = strdup(src);
+    if (char *p = strrchr(src_name, '/'); p) src_name = p+1;
+    if (char *p = strrchr(src_name, '.'); p) *p = '\0';
 
-        i32 src_len = strlen(src);
-        output_name = (char*)malloc(src_len + 1);
-        strcpy(output_name, src);
+    if (!out) out = sztringf(mem_dynamic, "./%s.o", src_name);
 
-        if (char *p = strrchr(output_name, '/'); p) output_name = p+1;
-        if (char *p = strrchr(output_name, '.'); p) *p = '\0';
+    out_name = strdup(out);
+    if (char *p = strrchr(out_name, '/'); p) out_name = p+1;
+    if (char *p = strrchr(out_name, '.'); p) *p = '\0';
 
-        String s_output_abs = absolute_path("./", scratch);
-        output_abs_path = sz_string(s_output_abs, mem_dynamic);
-    }
+    out_dir = strdup(out);
+    if (char *p = strrchr(out_dir, '/'); p) *p = '\0';
 
     Module global{};
     {
@@ -377,7 +379,7 @@ int main(int argc, char *argv[])
         }
 
         emit_ast_x64(&sb, global.ast);
-        write_file(stringf(scratch, "%s.s", output_name), &sb);
+        write_file(stringf(scratch, "%s/%s.s", out_dir, out_name), &sb);
     }
 
     {
@@ -385,8 +387,9 @@ int main(int argc, char *argv[])
 
         run_process("clang", {
             "-masm=intel",
-            stringf(scratch, "%s/%s.s", output_abs_path, output_name),
-            "-o", stringf(scratch, "%s/%s.o", output_abs_path, output_name),
+            "-c",
+            stringf(scratch, "%s/%s.s", out_dir, out_name),
+            "-o", stringf(scratch, "%s/%s.o", out_dir, out_name),
         });
     }
 
