@@ -42,14 +42,14 @@ const char* sz_from_enum(UnaryOp op)
 
 enum PrimitiveType {
     T_UNKNOWN = 0,
-    T_i32,
+    T_INTEGER,
 };
 
 const char* sz_from_enum(PrimitiveType type)
 {
     switch (type) {
     case T_UNKNOWN: return "unknown";
-    case T_i32:     return "i32";
+    case T_INTEGER: return "INT";
     }
 
     return "invalid";
@@ -57,6 +57,7 @@ const char* sz_from_enum(PrimitiveType type)
 
 struct TypeExpr {
     PrimitiveType type;
+    i32           size;
 };
 
 struct AST {
@@ -116,7 +117,11 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             LOG_INFO("%.*svar %.*s", depth, indent, STRFMT(ast->var.identifier.str));
             break;
         case AST_VAR_DECL:
-            LOG_INFO("%.*sdecl %.*s [%s]", depth, indent, STRFMT(ast->var_decl.identifier.str), sz_from_enum(ast->var_decl.type.type));
+            LOG_INFO("%.*sdecl %.*s [%s:%d]",
+                     depth, indent,
+                     STRFMT(ast->var_decl.identifier.str),
+                     sz_from_enum(ast->var_decl.type.type),
+                    ast->var_decl.type.size);
 
             if (ast->var_decl.init) debug_print_ast(ast->var_decl.init, depth+1);
             break;
@@ -181,6 +186,11 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
             .type = AST_LITERAL,
             .literal.token = lexer->t,
         };
+    } else if (optional_token(lexer, TOKEN_IDENTIFIER)) {
+        expr = ALLOC_T(mem, AST) {
+            .type = AST_VAR,
+            .var.identifier = lexer->t,
+        };
     }
 
     while (*lexer) {
@@ -208,7 +218,7 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
 TypeExpr parse_type_expression(Lexer *lexer)
 {
     if (optional_token(lexer, TOKEN_IDENTIFIER)) {
-        if (lexer->t == "i32") return { T_i32 };
+        if (lexer->t == "i32") return { T_INTEGER, 4 };
     }
     return { T_UNKNOWN };
 }
