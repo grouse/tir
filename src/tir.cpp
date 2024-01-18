@@ -18,6 +18,9 @@ enum Keyword : i32 {
 enum ASTType : i32 {
     AST_INVALID = 0,
 
+    AST_VAR_DECL,
+    AST_VAR,
+
     AST_RETURN,
     AST_PROCEDURE,
     AST_LITERAL,
@@ -29,6 +32,7 @@ enum UnaryOp : i8 {
 
     // UOP_NEG,
 };
+
 const char* sz_from_enum(UnaryOp op)
 {
     switch (op) {
@@ -36,6 +40,24 @@ const char* sz_from_enum(UnaryOp op)
     }
 }
 
+enum PrimitiveType {
+    T_UNKNOWN = 0,
+    T_i32,
+};
+
+const char* sz_from_enum(PrimitiveType type)
+{
+    switch (type) {
+    case T_UNKNOWN: return "unknown";
+    case T_i32:     return "i32";
+    }
+
+    return "invalid";
+}
+
+struct TypeExpr {
+    PrimitiveType type;
+};
 
 struct AST {
     AST *next;
@@ -46,6 +68,14 @@ struct AST {
             Token identifier;
             AST *body;
         } proc;
+        struct {
+            Token identifier;
+            TypeExpr type;
+            AST *init;
+        } var_decl;
+        struct {
+            Token identifier;
+        } var;
         struct {
             Token op;
             AST *lhs;
@@ -68,6 +98,8 @@ struct Module {
     DynamicArray<AST*> procedures;
 };
 
+#include "gen/internal/tir.h"
+
 Keyword keyword_from_string(String str)
 {
     if (str == "return") return KW_RETURN;
@@ -80,6 +112,14 @@ void debug_print_ast(AST *ast, i32 depth = 0)
 {
     for (; ast; ast = ast->next) {
         switch (ast->type) {
+        case AST_VAR:
+            LOG_INFO("%.*svar %.*s", depth, indent, STRFMT(ast->var.identifier.str));
+            break;
+        case AST_VAR_DECL:
+            LOG_INFO("%.*sdecl %.*s [%s]", depth, indent, STRFMT(ast->var_decl.identifier.str), sz_from_enum(ast->var_decl.type.type));
+
+            if (ast->var_decl.init) debug_print_ast(ast->var_decl.init, depth+1);
+            break;
         case AST_LITERAL:
             LOG_INFO("%.*sliteral %.*s", depth, indent, STRFMT(ast->literal.token.str));
             break;
@@ -165,15 +205,24 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
     return expr;
 }
 
-AST* parse_statement(Lexer *lexer, Allocator mem)
+TypeExpr parse_type_expression(Lexer *lexer)
+{
+    if (optional_token(lexer, TOKEN_IDENTIFIER)) {
+        if (lexer->t == "i32") return { T_i32 };
+    }
+    return { T_UNKNOWN };
+}
+
+AST* parse_statement(Lexer *lexer, Allocator mem) INTERNAL
 {
     if (optional_token(lexer, '{')) {
-        AST *ast = parse_statement(lexer, mem);
-        if (!ast) return nullptr;
+        AST *stmt = parse_statement(lexer, mem);
+        if (!stmt) return nullptr;
 
+        AST *ptr = stmt;
         while (*lexer && peek_token(lexer) != '}') {
-            ast->next = parse_statement(lexer, mem);
-            ast = ast->next;
+            ptr->next = parse_statement(lexer, mem);
+            ptr = ptr->next;
         }
 
         if (!require_next_token(lexer, '}')) {
@@ -181,7 +230,7 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
             return nullptr;
         }
 
-        return ast;
+        return stmt;
     } else if (optional_token(lexer, TOKEN_IDENTIFIER)) {
         Token identifier = lexer->t;
 
@@ -202,6 +251,37 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
             }
 
             return ast;
+        } else if (optional_token(lexer, ':')) {
+            AST *decl = ALLOC_T(mem, AST) {
+                .type = AST_VAR_DECL,
+                .var_decl.identifier = identifier,
+                .var_decl.type = parse_type_expression(lexer),
+            };
+
+            if (optional_token(lexer, '=')) {
+                Token op = lexer->t;
+
+                AST *lhs = ALLOC_T(mem, AST) {
+                    .type = AST_VAR,
+                    .var.identifier = identifier,
+                };
+
+                AST *rhs = parse_expression(lexer, mem);
+
+                decl->var_decl.init = ALLOC_T(mem, AST) {
+                    .type = AST_BINARY_OP,
+                    .binary_op.op = op,
+                    .binary_op.lhs = lhs,
+                    .binary_op.rhs = rhs,
+                };
+            }
+
+            if (!require_next_token(lexer, ';')) {
+                PARSE_ERROR(lexer, "expected ';' after declaration");
+                return nullptr;
+            }
+
+            return decl;
         } else {
             PARSE_ERROR(lexer, "unexpected identifier '%.*s'", STRFMT(lexer->t.str));
             return nullptr;
@@ -211,7 +291,7 @@ AST* parse_statement(Lexer *lexer, Allocator mem)
     return nullptr;
 }
 
-AST* parse_proc_decl(Lexer *lexer, Allocator mem)
+AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
 {
     if (lexer->t.type != TOKEN_IDENTIFIER) return nullptr;
     Token identifier = lexer->t;
@@ -428,7 +508,6 @@ int main(int argc, char *argv[])
         if (opts.out_type == OUTPUT_EXECUTABLE) {
             run_process("ld.lld", {
                 stringf(scratch, "%s/%s.o", out_dir, out_name),
-                "--entry", "_start",
                 "-o", stringf(scratch, "%s/%s", out_dir, out_name),
             });
         }
