@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+
 enum Keyword : i32 {
     KW_INVALID = 0,
     KW_RETURN,
@@ -358,7 +359,10 @@ void emit_ast_x64(StringBuilder *sb, AST *ast)
             case '-': append_stringf(sb, "  sub eax, ebx\n"); break;
             case '*': append_stringf(sb, "  imul eax, ebx\n"); break;
             case '/': append_stringf(sb, "  idiv ebx\n"); break;
-            default: LOG_ERROR("Invalid binary op '%.*s'", STRFMT(ast->binary_op.op.str)); break;
+            default:
+                LOG_ERROR("Invalid binary op '%.*s'",
+                          STRFMT(ast->binary_op.op.str));
+                break;
             }
 
             break;
@@ -366,7 +370,9 @@ void emit_ast_x64(StringBuilder *sb, AST *ast)
             if (ast->ret.expr) emit_ast_x64(sb, ast->ret.expr);
             append_stringf(sb, "  ret\n");
             break;
-        default: LOG_ERROR("Invalid AST node type '%d'", ast->type); break;
+        default:
+            LOG_ERROR("Invalid AST node type '%d'", ast->type);
+            break;
         }
         ast = ast->next;
     }
