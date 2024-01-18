@@ -18,11 +18,12 @@ enum Keyword : i32 {
 enum ASTType : i32 {
     AST_INVALID = 0,
 
-    AST_VAR_DECL,
     AST_VAR,
+    AST_VAR_DECL,
+
+    AST_PROC_DECL,
 
     AST_RETURN,
-    AST_PROCEDURE,
     AST_LITERAL,
     AST_BINARY_OP,
 };
@@ -133,7 +134,7 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             debug_print_ast(ast->binary_op.lhs, depth+1);
             debug_print_ast(ast->binary_op.rhs, depth+1);
             break;
-        case AST_PROCEDURE:
+        case AST_PROC_DECL:
             LOG_INFO("%.*sprocedure %.*s", depth, indent, STRFMT(ast->proc.identifier.str));
             if (ast->proc.body) debug_print_ast(ast->proc.body, depth+1);
             break;
@@ -325,7 +326,7 @@ AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
             }
 
             return ALLOC_T(mem, AST) {
-                .type = AST_PROCEDURE,
+                .type = AST_PROC_DECL,
                 .proc.identifier = identifier,
                 .proc.body = body,
             };
@@ -342,7 +343,7 @@ void emit_ast_x64(StringBuilder *sb, AST *ast)
         case AST_LITERAL:
             append_stringf(sb, "  mov eax, %.*s\n", STRFMT(ast->literal.token.str));
             break;
-        case AST_PROCEDURE:
+        case AST_PROC_DECL:
             append_stringf(sb, "%.*s:\n", STRFMT(ast->proc.identifier.str));
             emit_ast_x64(sb, ast->proc.body);
             break;
