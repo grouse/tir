@@ -14,7 +14,6 @@
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/NoFolder.h>
 
-
 enum Keyword : i32 {
     KW_INVALID = 0,
     KW_RETURN,
@@ -63,6 +62,7 @@ const char* sz_from_enum(UnaryOp op)
 
 enum PrimitiveType {
     T_UNKNOWN = 0,
+    T_VOID,
     T_INTEGER,
 };
 
@@ -70,6 +70,7 @@ const char* sz_from_enum(PrimitiveType type)
 {
     switch (type) {
     case T_UNKNOWN: return "unknown";
+    case T_VOID:    return "void";
     case T_INTEGER: return "INT";
     }
 
@@ -79,7 +80,30 @@ const char* sz_from_enum(PrimitiveType type)
 struct TypeExpr {
     PrimitiveType type;
     i32           size;
+
+    bool operator==(const TypeExpr &rhs) const = default;
+    bool operator==(const PrimitiveType &rhs) const { return type == rhs; }
 };
+
+llvm::Type * llvm_type_from_type_expr(llvm::LLVMContext *context, TypeExpr type)
+{
+    switch (type.type) {
+    case T_UNKNOWN: break;
+    case T_VOID:
+        return llvm::Type::getVoidTy(*context);
+    case T_INTEGER:
+        switch (type.size) {
+        case 1: return llvm::Type::getInt8Ty(*context);
+        case 2: return llvm::Type::getInt16Ty(*context);
+        case 4: return llvm::Type::getInt32Ty(*context);
+        case 8: return llvm::Type::getInt64Ty(*context);
+        default: PANIC("Invalid integer size %d", type.size);
+        }
+        break;
+    }
+
+    return nullptr;
+}
 
 struct AST {
     AST *next;
@@ -88,6 +112,7 @@ struct AST {
     union {
         struct {
             Token identifier;
+            TypeExpr ret_type;
             AST *body;
         } proc;
         struct {
@@ -105,6 +130,7 @@ struct AST {
         } binary_op;
         struct {
             Token token;
+            TypeExpr type;
         } literal;
         struct {
             Token token;
@@ -135,7 +161,9 @@ void debug_print_ast(AST *ast, i32 depth = 0)
     for (; ast; ast = ast->next) {
         switch (ast->type) {
         case AST_VAR:
-            LOG_INFO("%.*svar %.*s", depth, indent, STRFMT(ast->var.identifier.str));
+            LOG_INFO("%.*svar %.*s",
+                     depth, indent,
+                     STRFMT(ast->var.identifier.str));
             break;
         case AST_VAR_DECL:
             LOG_INFO("%.*sdecl %.*s [%s:%d]",
@@ -147,7 +175,11 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             if (ast->var_decl.init) debug_print_ast(ast->var_decl.init, depth+1);
             break;
         case AST_LITERAL:
-            LOG_INFO("%.*sliteral %.*s", depth, indent, STRFMT(ast->literal.token.str));
+            LOG_INFO("%.*sliteral %.*s [%s:%d]",
+                     depth, indent,
+                     STRFMT(ast->literal.token.str),
+                     sz_from_enum(ast->literal.type.type),
+                     ast->literal.type.size);
             break;
         case AST_BINARY_OP:
             LOG_INFO("%.*sbinary op %.*s", depth, indent, STRFMT(ast->binary_op.op.str));
@@ -155,7 +187,12 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             debug_print_ast(ast->binary_op.rhs, depth+1);
             break;
         case AST_PROC_DECL:
-            LOG_INFO("%.*sprocedure %.*s", depth, indent, STRFMT(ast->proc.identifier.str));
+            LOG_INFO("%.*sproc %.*s [%s:%d]",
+                     depth, indent,
+                     STRFMT(ast->proc.identifier.str),
+                     sz_from_enum(ast->proc.ret_type.type),
+                     ast->proc.ret_type.size);
+
             if (ast->proc.body) debug_print_ast(ast->proc.body, depth+1);
             break;
         case AST_RETURN:
@@ -206,6 +243,7 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
         expr = ALLOC_T(mem, AST) {
             .type = AST_LITERAL,
             .literal.token = lexer->t,
+            .literal.type = { T_INTEGER, 0 },
         };
     } else if (optional_token(lexer, TOKEN_IDENTIFIER)) {
         expr = ALLOC_T(mem, AST) {
@@ -356,6 +394,141 @@ AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
     return nullptr;
 }
 
+TypeExpr ast_typecheck(AST *ast, AST *proc)
+{
+    switch (ast->type) {
+    case AST_VAR_DECL:
+        if (ast->var_decl.type.type == T_UNKNOWN) {
+            if (ast->var_decl.init) {
+                ast->var_decl.type = ast_typecheck(ast->var_decl.init, proc);
+            } else {
+                LOG_ERROR("Cannot infer type of '%.*s'",
+                          STRFMT(ast->var_decl.identifier.str));
+            }
+        } else {
+            if (ast->var_decl.init) {
+                TypeExpr init_type = ast_typecheck(ast->var_decl.init, proc);
+                if (init_type.type != ast->var_decl.type.type) {
+                    // TODO(jesper): check if the type is compatible or implicitly convertible
+                    LOG_ERROR("Type mismatch in declaration of '%.*s'", STRFMT(ast->var_decl.identifier.str));
+                }
+            }
+        }
+        return ast->var_decl.type;
+    case AST_PROC_DECL:
+        for (AST *stmt = ast->proc.body; stmt; stmt = stmt->next)
+            ast_typecheck(stmt, ast);
+
+        // TODO(jesper): proc type expr
+        return { T_UNKNOWN };
+    case AST_RETURN: {
+        PANIC_IF(!proc || proc->type != AST_PROC_DECL, "expected AST_PROC_DECL");
+        TypeExpr ret_type = { T_VOID };
+        if (ast->ret.expr) ret_type = ast_typecheck(ast->ret.expr, proc);
+
+        if (proc->proc.ret_type == T_UNKNOWN)
+            proc->proc.ret_type = ret_type;
+
+        if (proc->proc.ret_type.type != ret_type.type)
+            LOG_ERROR("Type mismatch in return statement");
+
+        return ret_type;
+        } break;
+    case AST_LITERAL:
+        return ast->literal.type;
+    case AST_BINARY_OP: {
+        TypeExpr lhs = ast_typecheck(ast->binary_op.lhs, proc);
+        TypeExpr rhs = ast_typecheck(ast->binary_op.rhs, proc);
+
+        if (lhs.type != rhs.type) {
+            LOG_ERROR("Type mismatch in binary operation '%.*s'",
+                      STRFMT(ast->binary_op.op.str));
+        }
+
+        return lhs;
+    } break;
+    case AST_INVALID:
+        PANIC_UNREACHABLE();
+        break;
+    }
+
+    return { T_UNKNOWN };
+}
+
+i32 ast_sizecheck(AST *ast, AST *proc, i32 topdown_size = 0)
+{
+    switch (ast->type) {
+    case AST_INVALID:
+        PANIC_UNREACHABLE();
+        break;
+    case AST_VAR_DECL:
+        if (ast->var_decl.init) {
+            i32 init_size = ast_sizecheck(ast->var_decl.init, proc, ast->var_decl.type.size);
+            if (init_size != 0 && init_size != ast->var_decl.type.size) {
+                LOG_ERROR("Size mismatch in declaration of '%.*s'", STRFMT(ast->var_decl.identifier.str));
+            }
+            ast->var_decl.type.size = init_size;
+        } else if (ast->var_decl.type.size == 0) {
+            LOG_ERROR("Cannot infer size of '%.*s'", STRFMT(ast->var_decl.identifier.str));
+        }
+
+        return ast->var_decl.type.size;
+    case AST_LITERAL:
+        if (ast->literal.type.size == 0)
+            ast->literal.type.size = topdown_size;
+
+        if (ast->literal.type.size == 0 &&
+            ast->literal.type == T_INTEGER)
+        {
+            // TODO(jesper): I want to do more checking here to determine the smallest size required by the expression (which in the case of integer literals, depend on the size of the literal size itself), and propagate that information both upwards and sideways to other expressions, but I'm not sure how to do that yet.
+            ast->literal.type.size = 4;
+        }
+
+        if (ast->literal.type.size == 0) {
+            LOG_ERROR("Cannot infer size of '%.*s'", STRFMT(ast->literal.token.str));
+        }
+        return ast->literal.type.size;
+    case AST_BINARY_OP: {
+        i32 lhs = ast_sizecheck(ast->binary_op.lhs, proc, topdown_size);
+        i32 rhs = ast_sizecheck(ast->binary_op.rhs, proc, lhs);
+
+        if (lhs != rhs) {
+            // TODO(jesper): check for implicit conversion
+            LOG_ERROR("Size mismatch in binary operation '%.*s'", STRFMT(ast->binary_op.op.str));
+        }
+
+        return lhs;
+        } break;
+    case AST_PROC_DECL:
+        for (AST *stmt = ast->proc.body; stmt; stmt = stmt->next)
+            ast_sizecheck(stmt, ast);
+
+        // TODO(jesper): proc type size?
+        return 0;
+    case AST_RETURN: {
+        PANIC_IF(!proc || proc->type != AST_PROC_DECL, "expected AST_PROC_DECL");
+        i32 ret_size = proc->proc.ret_type.size;
+        if (ast->ret.expr)
+            ret_size = ast_sizecheck(ast->ret.expr, proc, ret_size);
+
+        if (proc->proc.ret_type.size == 0 &&
+            proc->proc.ret_type != T_VOID)
+        {
+            proc->proc.ret_type.size = ret_size;
+        }
+
+        if (ret_size != proc->proc.ret_type.size) {
+            LOG_ERROR("Size mismatch in return statement");
+        }
+
+        return ret_size;
+        } break;
+    }
+
+    return 0;
+}
+
+
 struct LLVMIR {
     llvm::LLVMContext context;
     llvm::IRBuilder<llvm::NoFolder> *ir;
@@ -401,8 +574,14 @@ llvm::Function* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
 
     SArena scratch = tl_scratch_arena();
 
+    llvm::Type *ret_type = llvm_type_from_type_expr(
+        &llvm->context,
+        ast->proc.ret_type);
+
+    if (!ret_type) ret_type = llvm::Type::getVoidTy(llvm->context);
+
     llvm::Function *func = llvm::Function::Create(
-        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm->context), false),
+        llvm::FunctionType::get(ret_type, false),
         llvm::Function::ExternalLinkage,
         sz_string(ast->proc.identifier.str, scratch),
         llvm->module);
@@ -577,9 +756,17 @@ int main(int argc, char *argv[])
                 return -1;
             }
         }
-
-        debug_print_ast(global.ast);
     }
+
+    for (AST *ast = global.ast; ast; ast = ast->next) {
+        ast_typecheck(ast, nullptr);
+    }
+
+    for (AST *ast = global.ast; ast; ast = ast->next) {
+        ast_sizecheck(ast, nullptr);
+    }
+
+    debug_print_ast(global.ast);
 
     {
         SArena scratch = tl_scratch_arena();
