@@ -25,6 +25,9 @@ executable("tir") {
 
         libs += ["user32", "shell32", "gdi32", "shlwapi"]
     } else if (current_os == "linux") {
+        include_dirs += [ "/usr/lib/llvm-16/include" ]
+        libs += [ "LLVM-16" ]
+
         sources += [
             "src/linux_file.cpp",
             "src/linux_memory.cpp",

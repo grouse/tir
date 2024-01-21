@@ -10,6 +10,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/NoFolder.h>
+
 
 enum Keyword : i32 {
     KW_INVALID = 0,
@@ -28,6 +32,21 @@ enum ASTType : i32 {
     AST_LITERAL,
     AST_BINARY_OP,
 };
+
+const char* sz_from_enum(ASTType type)
+{
+    switch (type) {
+    case AST_INVALID:   return "invalid";
+    case AST_VAR:       return "var";
+    case AST_VAR_DECL:  return "var_decl";
+    case AST_PROC_DECL: return "proc_decl";
+    case AST_RETURN:    return "return";
+    case AST_LITERAL:   return "literal";
+    case AST_BINARY_OP: return "binary_op";
+    }
+
+    return "invalid";
+}
 
 enum UnaryOp : i8 {
     UOP_INVALID = 0,
@@ -337,9 +356,84 @@ AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
     return nullptr;
 }
 
+struct LLVMIR {
+    llvm::LLVMContext context;
+    llvm::IRBuilder<llvm::NoFolder> *ir;
+    llvm::Module *module;
+};
+
+llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
+{
+    SArena scratch = tl_scratch_arena();
+
+    switch (ast->type) {
+    case AST_LITERAL: {
+        i32 val = atoi(sz_string(ast->literal.token.str, scratch));
+        return llvm->ir->getInt32(val);
+        } break;
+    case AST_BINARY_OP: {
+        llvm::Value *lhs = llvm_codegen_expr(llvm, ast->binary_op.lhs);
+        llvm::Value *rhs = llvm_codegen_expr(llvm, ast->binary_op.rhs);
+
+        switch (ast->binary_op.op.type) {
+        case '+': return llvm->ir->CreateAdd(lhs, rhs);
+        case '-': return llvm->ir->CreateSub(lhs, rhs);
+        case '*': return llvm->ir->CreateMul(lhs, rhs);
+        case '/': return llvm->ir->CreateSDiv(lhs, rhs);
+        default:
+            LOG_ERROR("Invalid binary op '%.*s'",
+                      STRFMT(ast->binary_op.op.str));
+            break;
+        }
+        break;
+    }
+    default:
+        LOG_ERROR("Invalid AST node type '%s'", sz_from_enum(ast->type));
+        break;
+    }
+    return nullptr;
+}
+
+
+llvm::Function* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
+{
+    PANIC_IF(ast->type != AST_PROC_DECL, "expected AST_PROC_DECL");
+
+    SArena scratch = tl_scratch_arena();
+
+    llvm::Function *func = llvm::Function::Create(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm->context), false),
+        llvm::Function::ExternalLinkage,
+        sz_string(ast->proc.identifier.str, scratch),
+        llvm->module);
+
+    llvm::BasicBlock *block = llvm::BasicBlock::Create(llvm->context, "entry", func);
+    llvm->ir->SetInsertPoint(block);
+
+    for (auto *stmt = ast->proc.body; stmt; stmt = stmt->next) {
+        switch (stmt->type) {
+        case AST_VAR_DECL:
+            break;
+        case AST_RETURN:
+            if (stmt->ret.expr) {
+                auto *val = llvm_codegen_expr(llvm, stmt->ret.expr);
+                llvm->ir->CreateRet(val);
+            } else {
+                llvm->ir->CreateRetVoid();
+            }
+            break;
+        default:
+            LOG_ERROR("Invalid statement type '%s'", sz_from_enum(stmt->type));
+            break;
+        }
+    }
+
+    return func;
+}
+
 void emit_ast_x64(StringBuilder *sb, AST *ast)
 {
-    while (ast) {
+    for (; ast; ast = ast->next) {
         switch (ast->type) {
         case AST_LITERAL:
             append_stringf(sb, "  mov eax, %.*s\n", STRFMT(ast->literal.token.str));
@@ -371,10 +465,9 @@ void emit_ast_x64(StringBuilder *sb, AST *ast)
             append_stringf(sb, "  ret\n");
             break;
         default:
-            LOG_ERROR("Invalid AST node type '%d'", ast->type);
+            LOG_ERROR("Invalid AST node type '%s'", sz_from_enum(ast->type));
             break;
         }
-        ast = ast->next;
     }
 }
 
@@ -486,6 +579,23 @@ int main(int argc, char *argv[])
         }
 
         debug_print_ast(global.ast);
+    }
+
+    {
+        SArena scratch = tl_scratch_arena();
+
+        LLVMIR llvm{};
+        llvm.ir = new llvm::IRBuilder<llvm::NoFolder>(
+            llvm::BasicBlock::Create(llvm.context, "entry"));
+        llvm.module = new llvm::Module("tir", llvm.context);
+
+        for (AST *it = global.ast; it; it = it->next) {
+            if (it->type == AST_PROC_DECL) {
+                llvm_codegen_proc(&llvm, it);
+            }
+        }
+
+        llvm.module->print(llvm::outs(), nullptr);
     }
 
     {

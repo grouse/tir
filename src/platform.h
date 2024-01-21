@@ -44,8 +44,6 @@ typedef signed char i8 ;
 typedef float f32;
 typedef double f64;
 
-#define atomic_exchange(var, value) __sync_lock_test_and_set(var, value)
-
 #elif defined(_WIN32)
 
 #define NOTHROW

@@ -10,7 +10,7 @@ extern "C" size_t strlen(const char * str) NOTHROW;
 extern "C" size_t wcslen(const wchar_t* wcs) NOTHROW;
 extern "C" int strcmp(const char * str1, const char * str2) NOTHROW;
 extern "C" int strncmp(const char * str1, const char * str2, size_t num) NOTHROW;
-extern "C" int tolower(int ch);
+extern "C" int tolower(int ch) NOTHROW;
 
 struct String {
     char *data;

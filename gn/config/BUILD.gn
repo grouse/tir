@@ -31,7 +31,8 @@ config("warnings") {
         "-Wno-char-subscripts",
         "-Wno-c99-designator",
         "-Wno-missing-field-initializers",
-        "-Wno-non-c-typedef-for-linkage"
+        "-Wno-non-c-typedef-for-linkage",
+        "-Wno-unused-parameter"
     ]
 }
 
