@@ -11,11 +11,14 @@ struct Process {
     int pid;
 };
 
+extern char **environ;
+
 Process* create_process(
     String exe,
     Array<String> args,
     ProcessOpts /*opts*/)
 {
+
     SArena scratch = tl_scratch_arena();
 
     char *sz_exe = sz_string(exe, scratch);
@@ -32,16 +35,18 @@ Process* create_process(
         return nullptr;
     }
 
-    Array<char*> argv; array_create(&argv, args.count+2, scratch);
-    argv[0] = sz_exe;
-    for (auto it : iterator(args)) argv[it.index+1] = sz_string(it, scratch);
-    *array_tail(argv) = nullptr;
 
-    LOG_INFO("spawning '%s'", sz_exe);
+    i32 argc = 0;
+    Array<char*> argv; array_create(&argv, args.count+2, scratch);
+    argv[argc++] = sz_exe;
+    for (auto it : iterator(args)) argv[argc++] = sz_string(it, scratch);
+    argv[argc++] = nullptr;
+
+    LOG_INFO("spawning process '%s'", sz_exe);
     //for (auto it : iterator(argv)) LOG_INFO("  argv[%d] = '%s'", it.index, argv[it.index]);
 
     int pid;
-    int result = posix_spawnp(&pid, sz_exe, &actions, &attr, argv.data, NULL);
+    int result = posix_spawnp(&pid, sz_exe, &actions, &attr, argv.data, environ);
     if (result != 0) {
         LOG_ERROR("posix_spawn exe: '%s': %s", sz_exe, strerror(errno));
     }
