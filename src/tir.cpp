@@ -13,6 +13,14 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/NoFolder.h>
+#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/CodeGen.h>
+#include <llvm/Target/TargetOptions.h>
+#include <llvm/Target/TargetMachine.h>
+#include <llvm/TargetParser/Host.h>
+#include <llvm/MC/TargetRegistry.h>
 
 enum Keyword : i32 {
     KW_INVALID = 0,
@@ -729,7 +737,7 @@ int main(int argc, char *argv[])
     out_dir = strdup(out);
     if (char *p = strrchr(out_dir, '/'); p) *p = '\0';
 
-    Module global{};
+    Module module{};
     {
         SArena scratch = tl_scratch_arena();
 
@@ -743,14 +751,14 @@ int main(int argc, char *argv[])
         Allocator mem = tl_linear_allocator(MAX_AST_MEM);
         Lexer lexer{ f.data, f.size, file };
 
-        AST **ptr = &global.ast;
+        AST **ptr = &module.ast;
         while (next_token(&lexer)) {
             if (AST *proc = parse_proc_decl(&lexer, mem); proc) {
-                array_add(&global.procedures, proc);
+                array_add(&module.procedures, proc);
                 (*ptr) = proc;
                 ptr = &proc->next;
 
-                if (proc->proc.identifier == "main") global.entry = proc;
+                if (proc->proc.identifier == "main") module.entry = proc;
             } else {
                 PARSE_ERROR(&lexer, "unknown declaration in global scope");
                 return -1;
@@ -758,25 +766,25 @@ int main(int argc, char *argv[])
         }
     }
 
-    for (AST *ast = global.ast; ast; ast = ast->next) {
+    for (AST *ast = module.ast; ast; ast = ast->next) {
         ast_typecheck(ast, nullptr);
     }
 
-    for (AST *ast = global.ast; ast; ast = ast->next) {
+    for (AST *ast = module.ast; ast; ast = ast->next) {
         ast_sizecheck(ast, nullptr);
     }
 
-    debug_print_ast(global.ast);
+    debug_print_ast(module.ast);
+
+    LLVMIR llvm{};
+    llvm.ir = new llvm::IRBuilder<llvm::NoFolder>(
+        llvm::BasicBlock::Create(llvm.context, "entry"));
+    llvm.module = new llvm::Module("tir", llvm.context);
 
     {
         SArena scratch = tl_scratch_arena();
 
-        LLVMIR llvm{};
-        llvm.ir = new llvm::IRBuilder<llvm::NoFolder>(
-            llvm::BasicBlock::Create(llvm.context, "entry"));
-        llvm.module = new llvm::Module("tir", llvm.context);
-
-        for (AST *it = global.ast; it; it = it->next) {
+        for (AST *it = module.ast; it; it = it->next) {
             if (it->type == AST_PROC_DECL) {
                 llvm_codegen_proc(&llvm, it);
             }
@@ -785,46 +793,54 @@ int main(int argc, char *argv[])
         llvm.module->print(llvm::outs(), nullptr);
     }
 
+
     {
         SArena scratch = tl_scratch_arena();
-        StringBuilder sb = { .alloc = scratch };
 
-        append_stringf(&sb, ".intel_syntax noprefix\n");
-        append_stringf(&sb, ".globl _start\n");
+        llvm::InitializeAllTargetInfos();
+        llvm::InitializeAllTargets();
+        llvm::InitializeAllTargetMCs();
+        llvm::InitializeAllAsmParsers();
+        llvm::InitializeAllAsmPrinters();
 
-        for (auto *decl : global.procedures) {
-            append_stringf(&sb, ".globl %.*s\n", STRFMT(decl->proc.identifier.str));
-        }
+        std::string target_triple = llvm::sys::getDefaultTargetTriple();
 
-        if (global.entry) {
-            append_string(&sb, "_start:\n");
-            append_stringf(&sb, "  call %.*s\n", STRFMT(global.entry->proc.identifier.str));
-            append_string(&sb, "  mov ebx, eax\n");
-            append_string(&sb, "  mov eax, 1\n");
-            append_string(&sb, "  int 0x80\n");
-        }
+        std::string error;
+        auto *target = llvm::TargetRegistry::lookupTarget(target_triple, error);
+        if (!target) LOG_ERROR("Failed to lookup target: %s", error.c_str());
 
+        llvm::TargetOptions opts{};
+        auto *target_machine = target->createTargetMachine(
+            target_triple, "generic", "",
+            opts,
+            llvm::Reloc::PIC_);
 
-        emit_ast_x64(&sb, global.ast);
-        write_file(stringf(scratch, "%s/%s.s", out_dir, out_name), &sb);
+        llvm.module->setTargetTriple(target_triple);
+        llvm.module->setDataLayout(target_machine->createDataLayout());
+
+        std::error_code ec;
+        llvm::raw_fd_ostream out{
+            sztringf(scratch, "%s/%s.o", out_dir, out_name),
+            ec,
+            llvm::sys::fs::OF_None
+        };
+
+        llvm::legacy::PassManager pass_manager{};
+        target_machine->addPassesToEmitFile(
+            pass_manager,
+            out, nullptr,
+            llvm::CGFT_ObjectFile);
+
+        pass_manager.run(*llvm.module);
+        out.flush();
     }
 
-    {
+    if (opts.out_type == OUTPUT_EXECUTABLE) {
         SArena scratch = tl_scratch_arena();
-
         run_process("clang", {
-            "-masm=intel",
-            "-c",
-            stringf(scratch, "%s/%s.s", out_dir, out_name),
-            "-o", stringf(scratch, "%s/%s.o", out_dir, out_name),
+            stringf(scratch, "%s/%s.o", out_dir, out_name),
+            "-o", stringf(scratch, "%s/%s", out_dir, out_name),
         });
-
-        if (opts.out_type == OUTPUT_EXECUTABLE) {
-            run_process("ld.lld", {
-                stringf(scratch, "%s/%s.o", out_dir, out_name),
-                "-o", stringf(scratch, "%s/%s", out_dir, out_name),
-            });
-        }
     }
 
     return 0;
