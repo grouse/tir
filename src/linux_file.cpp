@@ -244,10 +244,14 @@ FileHandle open_file(String path, FileOpenMode mode)
 	char *sz_path = sz_string(path, scratch);
 
 	int flags = O_RDWR;
-	if (mode == FILE_OPEN_CREATE) flags |= O_CREAT;
-	if (mode == FILE_OPEN_TRUNCATE) flags |= O_TRUNC;
+	int fmode = 0;
 
-	int fd = open(sz_path, flags);
+	if (mode == FILE_OPEN_CREATE) flags |= O_CREAT;
+	if (mode == FILE_OPEN_TRUNCATE) flags |= O_CREAT|O_TRUNC;
+
+	if (flags & O_CREAT) fmode |= S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH;
+
+	int fd = open(sz_path, flags, fmode);
 
 	if (fd == -1) {
 		LOG_ERROR("unhandled error opening file '%s', errono: %d: '%s'", sz_path, errno, strerror(errno));
