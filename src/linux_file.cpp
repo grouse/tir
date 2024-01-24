@@ -14,6 +14,8 @@
 #include "gen/string.h"
 
 extern "C" char *realpath(const char *path, char *resolved_path);
+extern "C" int mkstemp(char *tmpl);
+extern "C" int mkstemps(char *tmpl, int suffixlen);
 
 String exe_path;
 
@@ -261,7 +263,7 @@ FileHandle open_file(String path, FileOpenMode mode)
 	return (FileHandle)(i64)fd;
 }
 
-void write_file(FileHandle handle, char *data, i32 bytes)
+void write_file(FileHandle handle, const char *data, i32 bytes)
 {
 	int fd = (int)(i64)handle;
 	ASSERT(fd != -1);
@@ -272,10 +274,60 @@ void write_file(FileHandle handle, char *data, i32 bytes)
 	}
 }
 
+u64 file_offset(FileHandle handle)
+{
+    int fd = (int)(i64)handle;
+    ASSERT(fd != -1);
+    return lseek(fd, 0, SEEK_CUR);
+}
+
+u64 seek_file(FileHandle handle, u64 offset)
+{
+    int fd = (int)(i64)handle;
+    ASSERT(fd != -1);
+    return lseek(fd, offset, SEEK_SET);
+}
+
+String file_path(FileHandle handle, Allocator mem)
+{
+    int fd = (int)(i64)handle;
+    ASSERT(fd != -1);
+
+    SArena scratch = tl_scratch_arena(mem);
+
+    char buffer[PATH_MAX];
+    int result = readlink(
+        sztringf(scratch, "/proc/self/fd/%d", fd),
+        buffer,
+        sizeof buffer);
+
+    if (result == -1) {
+        LOG_ERROR("unable to readlink for file descriptor: %d", fd);
+        return {};
+    }
+
+    return string(buffer, result, mem);
+}
+
 void close_file(FileHandle handle)
 {
 	int fd = (int)(i64)handle;
 	close(fd);
+}
+
+FileHandle create_temporary_file(const char *name, const char *suffix) EXPORT
+{
+    SArena scratch = tl_scratch_arena();
+
+    if (suffix) {
+        char *tmpl = sztringf(scratch, "/tmp/%s-XXXXXX%s", name, suffix);
+        int fd = mkstemps(tmpl, strlen(suffix));
+        return (FileHandle)(i64)fd;
+    } else {
+        char *tmpl = sztringf(scratch, "/tmp/%s-XXXXXX", name);
+        int fd = mkstemp(tmpl);
+        return (FileHandle)(i64)fd;
+    }
 }
 
 String select_folder_dialog(Allocator /*mem*/)

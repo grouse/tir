@@ -443,7 +443,7 @@ FileHandle open_file(String path, FileOpenMode mode)
     return win32_open_file(sz_path, creation_mode, GENERIC_WRITE|GENERIC_READ);
 }
 
-void write_file(FileHandle handle, char *data, i32 bytes)
+void write_file(FileHandle handle, const char *data, i32 bytes)
 {
     WriteFile(handle, data, bytes, nullptr, nullptr);
 }

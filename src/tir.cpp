@@ -22,6 +22,36 @@
 #include <llvm/TargetParser/Host.h>
 #include <llvm/MC/TargetRegistry.h>
 
+// TODO(jesper): it's broken and doesn't work and I've no idea what LLVM expects the implementation to do because the documentation is absolutely garbage
+class raw_file_ostream : public llvm::raw_pwrite_stream {
+  void write_impl(const char *ptr, size_t size) override
+  {
+      LOG_INFO("write %p %lld", ptr, size);
+      write_file(file, ptr, size);
+  }
+
+  void pwrite_impl(const char *ptr, size_t size, uint64_t offset) override
+  {
+      LOG_INFO("pwrite %p %lld %lld", ptr, size, offset);
+      seek_file(file, offset);
+      write_file(file, ptr, size);
+  }
+
+  uint64_t current_pos() const override
+  {
+      u64 pos = file_offset(file);
+      LOG_INFO("current_pos: %lld", pos);
+      return pos;
+  }
+
+public:
+  FileHandle file;
+
+  raw_file_ostream(FileHandle file) : file(file) {}
+  ~raw_file_ostream() {}
+
+};
+
 enum Keyword : i32 {
     KW_INVALID = 0,
     KW_RETURN,
@@ -794,6 +824,8 @@ int main(int argc, char *argv[])
     }
 
 
+    DynamicArray<String> object_files{};
+
     {
         SArena scratch = tl_scratch_arena();
 
@@ -809,21 +841,36 @@ int main(int argc, char *argv[])
         auto *target = llvm::TargetRegistry::lookupTarget(target_triple, error);
         if (!target) LOG_ERROR("Failed to lookup target: %s", error.c_str());
 
-        llvm::TargetOptions opts{};
+        llvm::TargetOptions target_opts{};
         auto *target_machine = target->createTargetMachine(
             target_triple, "generic", "",
-            opts,
+            target_opts,
             llvm::Reloc::PIC_);
 
         llvm.module->setTargetTriple(target_triple);
         llvm.module->setDataLayout(target_machine->createDataLayout());
 
+        FileHandle fd;
+        String path;
+
+        if (opts.out_type == OUTPUT_OBJECT) {
+            path = stringf(mem_dynamic, "%s/%s.o", out_dir, out_name);
+            fd = open_file(path, FILE_OPEN_TRUNCATE);
+        } else {
+            fd = create_temporary_file(out_name, ".o");
+            path = file_path(fd, mem_dynamic);
+        }
+
+        defer { close_file(fd); };
+
+#if 0
         std::error_code ec;
-        llvm::raw_fd_ostream out{
-            sztringf(scratch, "%s/%s.o", out_dir, out_name),
-            ec,
-            llvm::sys::fs::OF_None
-        };
+        llvm::raw_fd_ostream out{ sz_string(path, scratch), ec };
+#elif 1
+        llvm::raw_fd_ostream out{ (int)(i64)fd, false };
+#else
+        raw_file_ostream out{ fd };
+#endif
 
         llvm::legacy::PassManager pass_manager{};
         target_machine->addPassesToEmitFile(
@@ -832,15 +879,19 @@ int main(int argc, char *argv[])
             llvm::CGFT_ObjectFile);
 
         pass_manager.run(*llvm.module);
+        array_add(&object_files, path);
+
         out.flush();
     }
 
     if (opts.out_type == OUTPUT_EXECUTABLE) {
         SArena scratch = tl_scratch_arena();
-        run_process("clang", {
-            stringf(scratch, "%s/%s.o", out_dir, out_name),
-            "-o", stringf(scratch, "%s/%s", out_dir, out_name),
-        });
+        DynamicArray<String> args{ .alloc = scratch };
+
+        array_add(&args, object_files);
+        array_add(&args, { String{ "-o" }, stringf(scratch, "%s/%s", out_dir, out_name) });
+
+        run_process("clang", args);
     }
 
     return 0;

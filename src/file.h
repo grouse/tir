@@ -68,8 +68,12 @@ void create_filewatch(String folder, DynamicArray<FileEvent> *events, Mutex *eve
 
 String absolute_path(String relative, Allocator mem);
 
+FileHandle create_temporary_file(const char *name, const char *suffix = nullptr);
 FileHandle open_file(String path, FileOpenMode mode);
-void write_file(FileHandle handle, char *data, i32 bytes);
+void write_file(FileHandle handle, const char *data, i32 bytes);
+u64 file_offset(FileHandle handle);
+u64 seek_file(FileHandle handle, u64 offset);
+String file_path(FileHandle handle, Allocator mem);
 void close_file(FileHandle handle);
 
 void write_file(String path, void *data, i32 bytes);
