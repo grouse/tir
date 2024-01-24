@@ -39,7 +39,7 @@ struct String {
         return data[i];
     }
 
-    operator bool() const { return length > 0; }
+    explicit operator bool() const { return length > 0; }
 };
 
 inline String string(const char *sz_string) { return String{ (char*)sz_string, (i32)strlen(sz_string) }; }

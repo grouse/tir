@@ -147,7 +147,7 @@ struct TokenStream {
     CXToken *at;
     CXToken *end;
 
-    operator bool() { return at < end; }
+    explicit operator bool() { return at < end; }
 };
 
 CXString clang_tokenString(TokenStream *stream)
@@ -252,7 +252,7 @@ struct List {
     ListIterator<T> begin() { return { head.next }; }
     ListIterator<T> end() { return { nullptr }; }
 
-    operator bool() { return head.next != nullptr; };
+    explicit operator bool() { return head.next != nullptr; };
 };
 
 template<typename T>

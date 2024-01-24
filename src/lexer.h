@@ -36,7 +36,7 @@ struct Token {
     bool operator==(char c) const { return type == (TokenType)c; }
     bool operator==(TokenType type) const { return this->type == type; }
 
-    operator bool() const { return type != TOKEN_EOF; }
+    explicit operator bool() const { return type != TOKEN_EOF; }
 };
 
 enum LexerFlags : u8 {
@@ -66,7 +66,7 @@ struct Lexer {
         : ptr(str.data), end(str.data + str.length), debug_name(debug_name), flags(flags)
     {}
 
-    operator bool() const { return ptr < end; }
+    explicit operator bool() const { return ptr < end; }
 };
 
 inline const char* sz_from_enum(TokenType type)
