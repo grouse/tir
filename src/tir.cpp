@@ -3,6 +3,7 @@
 #include "file.h"
 #include "lexer.h"
 #include "process.h"
+#include "hash_table.h"
 
 #include "string.h"
 
@@ -119,6 +120,7 @@ struct TypeExpr {
     PrimitiveType type;
     i32           size;
 
+    explicit operator bool() { return type != T_UNKNOWN && size != 0; }
     bool operator==(const TypeExpr &rhs) const = default;
     bool operator==(const PrimitiveType &rhs) const { return type == rhs; }
 };
@@ -183,6 +185,20 @@ struct Module {
 
     DynamicArray<AST*> procedures;
 };
+
+struct Scope {
+    llvm::BasicBlock *entry;
+    HashTable<String, llvm::AllocaInst*> variables;
+};
+
+struct LLVMIR {
+    llvm::LLVMContext context;
+    llvm::IRBuilder<llvm::NoFolder> *ir;
+    llvm::Module *module;
+
+    Scope scope;
+};
+
 
 #include "gen/internal/tir.h"
 
@@ -566,18 +582,51 @@ i32 ast_sizecheck(AST *ast, AST *proc, i32 topdown_size = 0)
     return 0;
 }
 
+llvm::AllocaInst* llvm_create_scoped_var(
+    Scope *scope,
+    llvm::Type *type,
+    String name)
+{
+    SArena scratch = tl_scratch_arena();
 
-struct LLVMIR {
-    llvm::LLVMContext context;
-    llvm::IRBuilder<llvm::NoFolder> *ir;
-    llvm::Module *module;
-};
+    llvm::IRBuilder<> ir(scope->entry, scope->entry->begin());
+    auto *var = ir.CreateAlloca(type, nullptr, sz_string(name, scratch));
+    map_set(&scope->variables, name, var);
+
+    return var;
+}
 
 llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
 {
     SArena scratch = tl_scratch_arena();
 
     switch (ast->type) {
+    case AST_VAR_DECL: {
+        llvm::AllocaInst *var = llvm_create_scoped_var(
+            &llvm->scope,
+            llvm_type_from_type_expr(&llvm->context, ast->var_decl.type),
+            ast->var_decl.identifier.str);
+
+        if (ast->var_decl.init) {
+            llvm::Value *init = llvm_codegen_expr(llvm, ast->var_decl.init);
+            llvm->ir->CreateStore(init, var);
+        } else {
+            // TODO(jesper): default init value
+        }
+        } break;
+    case AST_VAR: {
+        llvm::AllocaInst **it = map_find(
+            &llvm->scope.variables,
+            ast->var.identifier.str);
+
+        if (!it) {
+            LOG_ERROR("Unknown variable '%.*s'", STRFMT(ast->var.identifier.str));
+            return nullptr;
+        }
+
+        llvm::AllocaInst *var = *it;
+        return llvm->ir->CreateLoad(var->getAllocatedType(), var, var->getName());
+        } break;
     case AST_LITERAL: {
         i32 val = atoi(sz_string(ast->literal.token.str, scratch));
         return llvm->ir->getInt32(val);
@@ -627,9 +676,13 @@ llvm::Function* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
     llvm::BasicBlock *block = llvm::BasicBlock::Create(llvm->context, "entry", func);
     llvm->ir->SetInsertPoint(block);
 
+    llvm->scope.entry = block;
+    map_destroy(&llvm->scope.variables);
+
     for (auto *stmt = ast->proc.body; stmt; stmt = stmt->next) {
         switch (stmt->type) {
         case AST_VAR_DECL:
+            llvm_codegen_expr(llvm, stmt);
             break;
         case AST_RETURN:
             if (stmt->ret.expr) {

@@ -176,6 +176,15 @@ V* map_find_emplace(HashTable<K, V> *table, K key, V emp_value)
     return &table->slots[slot].value;
 }
 
+template<typename K, typename V>
+void map_destroy(HashTable<K, V> *table)
+{
+    FREE(table->alloc, table->slots);
+
+    table->slots = nullptr;
+    table->capacity = 0;
+    table->count = 0;
+}
 
 // string specializations
 template<typename V>
@@ -208,6 +217,23 @@ void map_find(HashTable<String, V> *table, String key, V value)
 
     table->slots[i] = { .key = duplicate_string(key, table->alloc), .value = value, .occupied = true };
     table->count++;
+}
+
+template<typename V>
+void map_destroy(HashTable<String, V> *table)
+{
+    if (table->slots) {
+        for (i32 i = 0; i < table->capacity; i++) {
+            if (!table->slots[i].occupied) continue;
+            FREE(table->alloc, table->slots[i].key.data);
+        }
+
+        FREE(table->alloc, table->slots);
+    }
+
+    table->slots = nullptr;
+    table->capacity = 0;
+    table->count = 0;
 }
 
 

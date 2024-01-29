@@ -9,6 +9,8 @@ executable("tir") {
         "src/memory.cpp",
         "src/string.cpp",
         "src/process.cpp",
+
+        "external/MurmurHash/MurmurHash3.cpp"
     ]
 
     include_dirs = [
