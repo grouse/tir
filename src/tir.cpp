@@ -63,6 +63,7 @@ enum ASTType : i32 {
 
     AST_VAR,
     AST_VAR_DECL,
+    AST_VAR_STORE,
 
     AST_PROC_DECL,
 
@@ -77,6 +78,7 @@ const char* sz_from_enum(ASTType type)
     case AST_INVALID:   return "invalid";
     case AST_VAR:       return "var";
     case AST_VAR_DECL:  return "var_decl";
+    case AST_VAR_STORE:  return "var_store";
     case AST_PROC_DECL: return "proc_decl";
     case AST_RETURN:    return "return";
     case AST_LITERAL:   return "literal";
@@ -162,6 +164,10 @@ struct AST {
         } var_decl;
         struct {
             Token identifier;
+            AST *rhs;
+        } var_store;
+        struct {
+            Token identifier;
         } var;
         struct {
             Token op;
@@ -226,7 +232,14 @@ void debug_print_ast(AST *ast, i32 depth = 0)
                      sz_from_enum(ast->var_decl.type.type),
                     ast->var_decl.type.size);
 
-            if (ast->var_decl.init) debug_print_ast(ast->var_decl.init, depth+1);
+            if (ast->var_decl.init) {
+                LOG_INFO("%.*sinit", depth, indent);
+                debug_print_ast(ast->var_decl.init, depth+1);
+            }
+            break;
+        case AST_VAR_STORE:
+            LOG_INFO("%.*sstore [%.*s]", depth, indent, STRFMT(ast->var_store.identifier.str));
+            debug_print_ast(ast->var_store.rhs, depth+1);
             break;
         case AST_LITERAL:
             LOG_INFO("%.*sliteral %.*s [%s:%d]",
@@ -382,21 +395,7 @@ AST* parse_statement(Lexer *lexer, Allocator mem) INTERNAL
             };
 
             if (optional_token(lexer, '=')) {
-                Token op = lexer->t;
-
-                AST *lhs = ALLOC_T(mem, AST) {
-                    .type = AST_VAR,
-                    .var.identifier = identifier,
-                };
-
-                AST *rhs = parse_expression(lexer, mem);
-
-                decl->var_decl.init = ALLOC_T(mem, AST) {
-                    .type = AST_BINARY_OP,
-                    .binary_op.op = op,
-                    .binary_op.lhs = lhs,
-                    .binary_op.rhs = rhs,
-                };
+                decl->var_decl.init = parse_expression(lexer, mem);
             }
 
             if (!require_next_token(lexer, ';')) {
@@ -451,6 +450,15 @@ AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
 TypeExpr ast_typecheck(AST *ast, AST *proc)
 {
     switch (ast->type) {
+    case AST_VAR:
+        // TODO(jesper): lookup the VAR_DECL of the identifier and check the type of it
+        LOG_ERROR("unimplemented");
+        break;
+    case AST_VAR_STORE: {
+        // TODO(jesper): lookup the VAR_DECL of the identifier and check the type of it
+        TypeExpr rhs = ast_typecheck(ast->var_store.rhs, proc);
+        return rhs;
+        } break;
     case AST_VAR_DECL:
         if (ast->var_decl.type.type == T_UNKNOWN) {
             if (ast->var_decl.init) {
@@ -512,6 +520,14 @@ TypeExpr ast_typecheck(AST *ast, AST *proc)
 i32 ast_sizecheck(AST *ast, AST *proc, i32 topdown_size = 0)
 {
     switch (ast->type) {
+    case AST_VAR:
+        // TODO(jesper): lookup the VAR_DECL of the identifier and check the type of it
+        LOG_ERROR("unimplemented");
+        break;
+    case AST_VAR_STORE: {
+        // TODO(jesper): lookup the VAR_DECL of the identifier and check the type of it
+        return ast_sizecheck(ast->var_store.rhs, proc, topdown_size);
+        } break;
     case AST_INVALID:
         PANIC_UNREACHABLE();
         break;
@@ -613,6 +629,20 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
         } else {
             // TODO(jesper): default init value
         }
+        } break;
+    case AST_VAR_STORE: {
+        llvm::AllocaInst **it = map_find(
+            &llvm->scope.variables,
+            ast->var_store.identifier.str);
+
+        if (!it) {
+            LOG_ERROR("Unknown variable '%.*s'", STRFMT(ast->var.identifier.str));
+            return nullptr;
+        }
+        llvm::AllocaInst *var = *it;
+
+        llvm::Value *rhs = llvm_codegen_expr(llvm, ast->var_store.rhs);
+        return llvm->ir->CreateStore(rhs, var);
         } break;
     case AST_VAR: {
         llvm::AllocaInst **it = map_find(
