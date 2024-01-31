@@ -101,10 +101,12 @@ const char* sz_from_enum(UnaryOp op)
     }
 }
 
-enum PrimitiveType {
+enum PrimitiveType : i32 {
+    T_INVALID = -1,
     T_UNKNOWN = 0,
     T_VOID,
     T_INTEGER,
+
 };
 
 const char* sz_from_enum(PrimitiveType type)
@@ -113,6 +115,7 @@ const char* sz_from_enum(PrimitiveType type)
     case T_UNKNOWN: return "unknown";
     case T_VOID:    return "void";
     case T_INTEGER: return "INT";
+    case T_INVALID:
     }
 
     return "invalid";
@@ -130,6 +133,7 @@ struct TypeExpr {
 llvm::Type * llvm_type_from_type_expr(llvm::LLVMContext *context, TypeExpr type)
 {
     switch (type.type) {
+    case T_INVALID: break;
     case T_UNKNOWN: break;
     case T_VOID:
         return llvm::Type::getVoidTy(*context);
@@ -468,13 +472,17 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
     case AST_VAR_LOAD: {
         Symbol *sym = map_find(&module->symbols, ast->var_load.identifier.str);
         if (!sym) {
-            TERROR(ast->var_load.identifier, "Unknown variable '%.*s'", STRFMT(ast->var_load.identifier.str));
-            return { T_UNKNOWN };
+            TERROR(ast->var_load.identifier,
+                   "unknown variable '%.*s'",
+                   STRFMT(ast->var_load.identifier.str));
+            return { T_INVALID };
         }
 
         if (sym->type != SYM_VARIABLE) {
-            LOG_ERROR("symbol '%.*s' is not a variable", STRFMT(ast->var_load.identifier.str));
-            return { T_UNKNOWN };
+            TERROR(ast->var_load.identifier,
+                   "'%.*s' is not a variable",
+                   STRFMT(ast->var_load.identifier.str));
+            return { T_INVALID };
         }
 
         return sym->variable.type;
@@ -482,23 +490,32 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
     case AST_VAR_STORE: {
         Symbol *sym = map_find(&module->symbols, ast->var_store.identifier.str);
         if (!sym) {
-            LOG_ERROR("Unknown variable '%.*s'", STRFMT(ast->var_load.identifier.str));
-            return { T_UNKNOWN };
+            TERROR(ast->var_load.identifier,
+                   "Unknown variable '%.*s'",
+                   STRFMT(ast->var_load.identifier.str));
+            return { T_INVALID };
         }
 
         if (sym->type != SYM_VARIABLE) {
-            LOG_ERROR("symbol '%.*s' is not a variable", STRFMT(ast->var_load.identifier.str));
-            return { T_UNKNOWN };
+            TERROR(ast->var_load.identifier,
+                   "symbol '%.*s' is not a variable",
+                   STRFMT(ast->var_load.identifier.str));
+            return { T_INVALID };
         }
 
+        TypeExpr lhs = sym->variable.type;
         TypeExpr rhs = ast_typecheck(ast->var_store.rhs, module, proc);
-        if (sym->variable.type != rhs) {
+        if (lhs != rhs) {
+
             // TODO(jesper): implicit/explicit conversion rules
-            LOG_ERROR("Type mismatch");
-            return { T_UNKNOWN };
+            TERROR(ast->var_store.identifier,
+                   "type mismatch, variable declared as [%s:%d], assignment deduced as [%s:%d]",
+                   sz_from_enum(lhs.type), lhs.size,
+                   sz_from_enum(rhs.type), rhs.size);
+            return { T_INVALID };
         }
 
-        return sym->variable.type;
+        return lhs;
         } break;
     case AST_VAR_DECL:
         if (ast->var_decl.type) {
@@ -545,8 +562,14 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
         if (proc->proc.ret_type == T_UNKNOWN)
             proc->proc.ret_type = ret_type;
 
-        if (proc->proc.ret_type.type != ret_type.type)
-            LOG_ERROR("Type mismatch in return statement");
+        if (proc->proc.ret_type.type != ret_type.type) {
+            TERROR(ast->ret.token,
+                   "type mismatch in return statement; proc ret type dedeuced to [%s:%d], return expression deduced as [%s:%d]",
+                   sz_from_enum(proc->proc.ret_type.type), proc->proc.ret_type.size,
+                   sz_from_enum(ret_type.type), ret_type.size);
+
+            return { T_INVALID };
+        }
 
         return ret_type;
         } break;
@@ -557,8 +580,11 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
         TypeExpr rhs = ast_typecheck(ast->binary_op.rhs, module, proc);
 
         if (lhs.type != rhs.type) {
-            LOG_ERROR("Type mismatch in binary operation '%.*s'",
-                      STRFMT(ast->binary_op.op.str));
+            TERROR(ast->binary_op.op,
+                   "type mismatch in binary operation [%s:%d] %.*s [%s:%d]",
+                   sz_from_enum(lhs.type), lhs.size,
+                   STRFMT(ast->binary_op.op.str),
+                   sz_from_enum(rhs.type), rhs.size);
         }
 
         return lhs;
@@ -582,7 +608,9 @@ i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
         }
 
         if (sym->type != SYM_VARIABLE) {
-            LOG_ERROR("symbol '%.*s' is not a variable", STRFMT(ast->var_load.identifier.str));
+            TERROR(ast->var_load.identifier,
+                   "symbol '%.*s' is not a variable",
+                   STRFMT(ast->var_load.identifier.str));
             return -1;
         }
 
@@ -592,12 +620,16 @@ i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
     case AST_VAR_STORE: {
         Symbol *sym = map_find(&module->symbols, ast->var_store.identifier.str);
         if (!sym) {
-            TERROR(ast->var_load.identifier, "Unknown variable '%.*s'", STRFMT(ast->var_load.identifier.str));
+            TERROR(ast->var_load.identifier,
+                   "unknown variable '%.*s'",
+                   STRFMT(ast->var_load.identifier.str));
             return -1;
         }
 
         if (sym->type != SYM_VARIABLE) {
-            LOG_ERROR("symbol '%.*s' is not a variable", STRFMT(ast->var_load.identifier.str));
+            TERROR(ast->var_load.identifier,
+                   "symbol '%.*s' is not a variable",
+                   STRFMT(ast->var_load.identifier.str));
             return -1;
         }
 
