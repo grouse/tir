@@ -1,8 +1,8 @@
 main :: ()
 {
-    x : i32;
-    y : i32 = 3;
-    z := 4;
-
-   return z;
+    x : i32 = 2;
+    y := 5;
+    z : i32 = x;
+    w := z;
+    return w;
 }

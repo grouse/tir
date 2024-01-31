@@ -518,19 +518,17 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
         return lhs;
         } break;
     case AST_VAR_DECL:
-        if (ast->var_decl.type) {
-            if (ast->var_decl.init) {
-                ast->var_decl.type = ast_typecheck(ast->var_decl.init, module, proc);
-            }
-        } else {
-            if (ast->var_decl.init) {
-                TypeExpr init_type = ast_typecheck(ast->var_decl.init, module, proc);
-                if (init_type != ast->var_decl.type) {
-                    // TODO(jesper): check if the type is compatible or implicitly convertible
-                    TERROR(ast->var_decl.identifier,
-                           "type mismatch in declaration of '%.*s'",
-                           STRFMT(ast->var_decl.identifier.str));
-                }
+        if (ast->var_decl.init) {
+            TypeExpr init_type = ast_typecheck(ast->var_decl.init, module, proc);
+            if (ast->var_decl.type == T_UNKNOWN) {
+                ast->var_decl.type = init_type;
+            } else if (init_type.type != ast->var_decl.type.type) {
+                // TODO(jesper): check if the type is compatible or implicitly convertible
+                TERROR(ast->var_decl.identifier,
+                       "type mismatch in declaration and assignment of variable, declared as [%s:%d], assignment deduced as [%s:%d]",
+                       sz_from_enum(ast->var_decl.type.type), ast->var_decl.type.size,
+                       sz_from_enum(init_type.type), init_type.size);
+                return { T_INVALID };
             }
         }
 
@@ -538,7 +536,7 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
             TERROR(ast->var_decl.identifier,
                    "cannot infer type of '%.*s'",
                    STRFMT(ast->var_decl.identifier.str));
-            return ast->var_decl.type;
+            return { T_INVALID };
         }
 
         map_set(&module->symbols, ast->var_decl.identifier.str, {
