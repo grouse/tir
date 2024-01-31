@@ -8,6 +8,11 @@
 #define PARSE_ERROR(lexer, fmt, ...)\
     LOG_ERROR("parse error: %.*s:%d:%d: " fmt, STRFMT((lexer)->debug_name), (lexer)->t.l0+1, (lexer)->t.c0+1, ##__VA_ARGS__)
 
+#define TERROR(token, fmt, ...)\
+    LOG_ERROR("parse error %d:%d: " fmt, (token).l0+1, (token).c0+1, ##__VA_ARGS__)
+
+
+
 enum TokenType : u16 {
     TOKEN_ADD = '+',
     TOKEN_SUB = '-',
