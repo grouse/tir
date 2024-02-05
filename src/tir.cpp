@@ -127,17 +127,17 @@ const char* sz_from_enum(PrimitiveType type)
 }
 
 struct TypeExpr {
-    PrimitiveType type;
+    PrimitiveType prim;
     i32           size;
 
-    explicit operator bool() { return type != T_UNKNOWN && size != 0; }
+    explicit operator bool() { return prim != T_UNKNOWN && size != 0; }
     bool operator==(const TypeExpr &rhs) const = default;
-    bool operator==(const PrimitiveType &rhs) const { return type == rhs; }
+    bool operator==(const PrimitiveType &rhs) const { return prim == rhs; }
 };
 
 llvm::Type * llvm_type_from_type_expr(llvm::LLVMContext *context, TypeExpr type)
 {
-    switch (type.type) {
+    switch (type.prim) {
     case T_INVALID: break;
     case T_UNKNOWN: break;
     case T_VOID:
@@ -281,7 +281,7 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             LOG_INFO("%.*sdecl %.*s [%s:%d]",
                      depth, indent,
                      STRFMT(ast->var_decl.identifier.str),
-                     sz_from_enum(ast->var_decl.type.type),
+                     sz_from_enum(ast->var_decl.type.prim),
                     ast->var_decl.type.size);
 
             if (ast->var_decl.init) {
@@ -297,7 +297,7 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             LOG_INFO("%.*sliteral %.*s [%s:%d]",
                      depth, indent,
                      STRFMT(ast->literal.token.str),
-                     sz_from_enum(ast->literal.type.type),
+                     sz_from_enum(ast->literal.type.prim),
                      ast->literal.type.size);
             break;
         case AST_BINARY_OP:
@@ -309,7 +309,7 @@ void debug_print_ast(AST *ast, i32 depth = 0)
             LOG_INFO("%.*sproc %.*s [%s:%d]",
                      depth, indent,
                      STRFMT(ast->proc.identifier.str),
-                     sz_from_enum(ast->proc.ret_type.type),
+                     sz_from_enum(ast->proc.ret_type.prim),
                      ast->proc.ret_type.size);
 
             if (ast->proc.body) debug_print_ast(ast->proc.body, depth+1);
@@ -440,7 +440,6 @@ TypeExpr parse_type_expression(Lexer *lexer)
         if (lexer->t == "f64") return { T_FLOAT, 8 };
 
         if (lexer->t == "bool") return { T_BOOL, 1 };
-
         return { T_INVALID };
     }
 
@@ -589,8 +588,8 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
             // TODO(jesper): implicit/explicit conversion rules
             TERROR(ast->var_store.identifier,
                    "type mismatch, variable declared as [%s:%d], assignment deduced as [%s:%d]",
-                   sz_from_enum(lhs.type), lhs.size,
-                   sz_from_enum(rhs.type), rhs.size);
+                   sz_from_enum(lhs.prim), lhs.size,
+                   sz_from_enum(rhs.prim), rhs.size);
             return { T_INVALID };
         }
 
@@ -601,12 +600,12 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
             TypeExpr init_type = ast_typecheck(ast->var_decl.init, module, proc);
             if (ast->var_decl.type == T_UNKNOWN) {
                 ast->var_decl.type = init_type;
-            } else if (init_type.type != ast->var_decl.type.type) {
+            } else if (init_type.prim != ast->var_decl.type.prim) {
                 // TODO(jesper): check if the type is compatible or implicitly convertible
                 TERROR(ast->var_decl.identifier,
                        "type mismatch in declaration and assignment of variable, declared as [%s:%d], assignment deduced as [%s:%d]",
-                       sz_from_enum(ast->var_decl.type.type), ast->var_decl.type.size,
-                       sz_from_enum(init_type.type), init_type.size);
+                       sz_from_enum(ast->var_decl.type.prim), ast->var_decl.type.size,
+                       sz_from_enum(init_type.prim), init_type.size);
                 return { T_INVALID };
             }
         }
@@ -639,11 +638,11 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
         if (proc->proc.ret_type == T_UNKNOWN)
             proc->proc.ret_type = ret_type;
 
-        if (proc->proc.ret_type.type != ret_type.type) {
+        if (proc->proc.ret_type.prim != ret_type.prim) {
             TERROR(ast->ret.token,
                    "type mismatch in return statement; proc ret type dedeuced to [%s:%d], return expression deduced as [%s:%d]",
-                   sz_from_enum(proc->proc.ret_type.type), proc->proc.ret_type.size,
-                   sz_from_enum(ret_type.type), ret_type.size);
+                   sz_from_enum(proc->proc.ret_type.prim), proc->proc.ret_type.size,
+                   sz_from_enum(ret_type.prim), ret_type.size);
 
             return { T_INVALID };
         }
@@ -656,12 +655,12 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
         TypeExpr lhs = ast_typecheck(ast->binary_op.lhs, module, proc);
         TypeExpr rhs = ast_typecheck(ast->binary_op.rhs, module, proc);
 
-        if (lhs.type != rhs.type) {
+        if (lhs.prim != rhs.prim) {
             TERROR(ast->binary_op.op,
                    "type mismatch in binary operation [%s:%d] %.*s [%s:%d]",
-                   sz_from_enum(lhs.type), lhs.size,
+                   sz_from_enum(lhs.prim), lhs.size,
                    STRFMT(ast->binary_op.op.str),
-                   sz_from_enum(rhs.type), rhs.size);
+                   sz_from_enum(rhs.prim), rhs.size);
         }
 
         return lhs;
@@ -716,7 +715,7 @@ i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
         if (rhs != 0 && rhs != sym->variable.type.size) {
             TERROR(ast->var_store.identifier,
                    "sizing mismtach in variable store, declared as [%s:%d], rhs requires deduced as size %d",
-                   sz_from_enum(sym->variable.type.type), sym->variable.type.size,
+                   sz_from_enum(sym->variable.type.prim), sym->variable.type.size,
                    rhs);
             return -1;
         }
@@ -737,7 +736,7 @@ i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
             if (init_size != 0 && init_size != ast->var_decl.type.size) {
                 TERROR(ast->var_decl.identifier,
                        "size mismatch in variable declaration, declared as [%s:%d], initialized deduced as type %d",
-                       sz_from_enum(ast->var_decl.type.type), ast->var_decl.type.size,
+                       sz_from_enum(ast->var_decl.type.prim), ast->var_decl.type.size,
                        init_size);
             }
         } else if (ast->var_decl.type.size == 0) {
@@ -869,7 +868,7 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
         return llvm->ir->CreateLoad(var->getAllocatedType(), var, var->getName());
         } break;
     case AST_LITERAL: {
-        switch (ast->literal.type.type) {
+        switch (ast->literal.type.prim) {
         case T_INTEGER:
         case T_UNSIGNED:
             switch (ast->literal.type.size) {
