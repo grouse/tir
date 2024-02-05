@@ -106,16 +106,21 @@ enum PrimitiveType : i32 {
     T_UNKNOWN = 0,
     T_VOID,
     T_INTEGER,
-
+    T_UNSIGNED,
+    T_FLOAT,
+    T_BOOL,
 };
 
 const char* sz_from_enum(PrimitiveType type)
 {
     switch (type) {
-    case T_UNKNOWN: return "unknown";
-    case T_VOID:    return "void";
-    case T_INTEGER: return "INT";
-    case T_INVALID:
+    case T_UNKNOWN:  return "unknown";
+    case T_VOID:     return "void";
+    case T_INTEGER:  return "INT";
+    case T_UNSIGNED: return "UINT";
+    case T_FLOAT:    return "FLOAT";
+    case T_BOOL:     return "BOOL";
+    case T_INVALID:  break;
     }
 
     return "invalid";
@@ -144,6 +149,29 @@ llvm::Type * llvm_type_from_type_expr(llvm::LLVMContext *context, TypeExpr type)
         case 4: return llvm::Type::getInt32Ty(*context);
         case 8: return llvm::Type::getInt64Ty(*context);
         default: PANIC("Invalid integer size %d", type.size);
+        }
+        break;
+    case T_UNSIGNED:
+        // TODO(jesper): how does LLVM distinguish between signed and unsigned types?
+        switch (type.size) {
+        case 1: return llvm::Type::getInt8Ty(*context);
+        case 2: return llvm::Type::getInt16Ty(*context);
+        case 4: return llvm::Type::getInt32Ty(*context);
+        case 8: return llvm::Type::getInt64Ty(*context);
+        default: PANIC("Invalid unsignd integer size %d", type.size);
+        }
+        break;
+    case T_FLOAT:
+        switch (type.size) {
+        case 4: return llvm::Type::getFloatTy(*context);
+        case 8: return llvm::Type::getDoubleTy(*context);
+        default: PANIC("invalid float size: %d", type.size);
+        }
+        break;
+    case T_BOOL:
+        switch (type.size) {
+        case 1: return llvm::Type::getInt8Ty(*context);
+        default: PANIC("invalid bool size: %d", type.size);
         }
         break;
     }
@@ -331,6 +359,21 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
             .literal.token = lexer->t,
             .literal.type = { T_INTEGER, 0 },
         };
+    } else if (optional_token(lexer, TOKEN_NUMBER)) {
+        // TODO(jesper): how do I distinguish between f32 and f64 in literals?
+        expr = ALLOC_T(mem, AST) {
+            .type = AST_LITERAL,
+            .literal.token = lexer->t,
+            .literal.type = { T_FLOAT, 4 },
+        };
+    } else if (optional_identifier(lexer, "false") ||
+               optional_identifier(lexer, "true"))
+    {
+        expr = ALLOC_T(mem, AST) {
+            .type = AST_LITERAL,
+            .literal.token = lexer->t,
+            .literal.type = { T_BOOL, 1 },
+        };
     } else if (optional_token(lexer, TOKEN_IDENTIFIER)) {
         expr = ALLOC_T(mem, AST) {
             .type = AST_VAR_LOAD,
@@ -363,8 +406,24 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
 TypeExpr parse_type_expression(Lexer *lexer)
 {
     if (optional_token(lexer, TOKEN_IDENTIFIER)) {
-        if (lexer->t == "i32") return { T_INTEGER, 4 };
+        if (lexer->t == "i8")  return { T_INTEGER,  1 };
+        if (lexer->t == "i16") return { T_INTEGER,  2 };
+        if (lexer->t == "i32") return { T_INTEGER,  4 };
+        if (lexer->t == "i64") return { T_INTEGER,  8 };
+
+        if (lexer->t == "u8")  return { T_UNSIGNED, 1 };
+        if (lexer->t == "u16") return { T_UNSIGNED, 2 };
+        if (lexer->t == "u32") return { T_UNSIGNED, 4 };
+        if (lexer->t == "u64") return { T_UNSIGNED, 8 };
+
+        if (lexer->t == "f32") return { T_FLOAT, 4 };
+        if (lexer->t == "f64") return { T_FLOAT, 8 };
+
+        if (lexer->t == "bool") return { T_BOOL, 1 };
+
+        return { T_INVALID };
     }
+
     return { T_UNKNOWN };
 }
 
@@ -671,7 +730,8 @@ i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
             ast->literal.type.size = topdown_size;
 
         if (ast->literal.type.size == 0 &&
-            ast->literal.type == T_INTEGER)
+            (ast->literal.type == T_INTEGER ||
+             ast->literal.type == T_UNSIGNED))
         {
             // TODO(jesper): I want to do more checking here to determine the smallest size required by the expression (which in the case of integer literals, depend on the size of the literal size itself), and propagate that information both upwards and sideways to other expressions, but I'm not sure how to do that yet.
             ast->literal.type.size = 4;
@@ -769,9 +829,10 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
             TERROR(ast->var_load.identifier, "unknown variable");
             return nullptr;
         }
-        llvm::AllocaInst *var = *it;
 
+        llvm::AllocaInst *var = *it;
         llvm::Value *rhs = llvm_codegen_expr(llvm, ast->var_store.rhs);
+
         return llvm->ir->CreateStore(rhs, var);
         } break;
     case AST_VAR_LOAD: {
@@ -788,8 +849,16 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
         return llvm->ir->CreateLoad(var->getAllocatedType(), var, var->getName());
         } break;
     case AST_LITERAL: {
-        i32 val = atoi(sz_string(ast->literal.token.str, scratch));
-        return llvm->ir->getInt32(val);
+        i64 val = i64_from_string(ast->literal.token.str);
+        switch (ast->literal.type.size) {
+        case 1: return llvm->ir->getInt8(val);
+        case 2: return llvm->ir->getInt16(val);
+        case 4: return llvm->ir->getInt32(val);
+        case 8: return llvm->ir->getInt64(val);
+        default:
+            PANIC("invalid integer size: %d", ast->literal.type.size);
+            return nullptr;
+        }
         } break;
     case AST_BINARY_OP: {
         llvm::Value *lhs = llvm_codegen_expr(llvm, ast->binary_op.lhs);

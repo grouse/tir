@@ -150,15 +150,14 @@ bool optional_token(Lexer *lexer, char c, Token *t /*= nullptr */) EXPORT
     return true;
 }
 
-bool optional_identifier(Lexer *lexer, String str, Token *t /*= nullptr */)
+bool optional_identifier(Lexer *lexer, String str, Token *t /*= nullptr */) EXPORT
 {
-    if (peek_token(lexer) == str) {
-        next_token(lexer);
-        if (t) *t = lexer->t;
-        return true;
-    }
+    Token lh = peek_token(lexer);
+    if (lh.type != TOKEN_IDENTIFIER || lh.str != str) return false;
 
-    return false;
+    next_token(lexer);
+    if (t) *t = lexer->t;
+    return true;
 }
 
 bool is_identifier(Token t, String str) EXPORT

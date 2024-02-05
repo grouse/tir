@@ -106,16 +106,41 @@ String slice(String str, i32 start)
     return r;
 }
 
-i32 i32_from_string(String s)
+i32 i32_from_string(String s) EXPORT
 {
     if (i32 value; i32_from_string(s, &value)) return value;
     return -1;
 }
 
-bool i32_from_string(String s, i32 *dst)
+bool i32_from_string(String s, i32 *dst) EXPORT
 {
     i32 sign = 1;
     i32 result = 0;
+
+    i32 i = 0;
+    if (s[0] == '-') {
+        sign = -1;
+        i = 1;
+    }
+
+    for (; i < s.length; i++) {
+        result = result * 10 + (s[i] - '0');
+    }
+
+    *dst = sign*result;
+    return true;
+}
+
+i64 i64_from_string(String s) EXPORT
+{
+    if (i64 value; i64_from_string(s, &value)) return value;
+    return -1;
+}
+
+bool i64_from_string(String s, i64 *dst) EXPORT
+{
+    i64 sign = 1;
+    i64 result = 0;
 
     i32 i = 0;
     if (s[0] == '-') {

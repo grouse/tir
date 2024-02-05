@@ -4,5 +4,9 @@ main :: ()
     y := 5;
     z : i32 = x;
     w := z;
+
+    a : i16 = 2;
+    b : f32 = 4.2;
+    c : bool = false;
     return w;
 }
