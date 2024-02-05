@@ -170,7 +170,7 @@ llvm::Type * llvm_type_from_type_expr(llvm::LLVMContext *context, TypeExpr type)
         break;
     case T_BOOL:
         switch (type.size) {
-        case 1: return llvm::Type::getInt8Ty(*context);
+        case 1: return llvm::Type::getInt1Ty(*context);
         default: PANIC("invalid bool size: %d", type.size);
         }
         break;
