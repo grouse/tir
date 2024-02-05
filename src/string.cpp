@@ -106,6 +106,19 @@ String slice(String str, i32 start)
     return r;
 }
 
+bool bool_from_string(String s) EXPORT
+{
+    if (s == "true") return true;
+    return false;
+}
+
+bool bool_from_string(String s, bool *b) EXPORT
+{
+    if (s == "true") return *b = true, true;
+    if (s == "false") return *b = false, true;
+    return false;
+}
+
 i32 i32_from_string(String s) EXPORT
 {
     if (i32 value; i32_from_string(s, &value)) return value;

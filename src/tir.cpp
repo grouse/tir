@@ -209,6 +209,11 @@ struct AST {
         struct {
             Token token;
             TypeExpr type;
+            union {
+                i64 ival;
+                f32 fval;
+                bool bval;
+            };
         } literal;
         struct {
             Token token;
@@ -359,6 +364,11 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
             .literal.token = lexer->t,
             .literal.type = { T_INTEGER, 0 },
         };
+
+        if (!i64_from_string(lexer->t.str, &expr->literal.ival)) {
+            TERROR(lexer->t, "invalid integer literal");
+            return nullptr;
+        }
     } else if (optional_token(lexer, TOKEN_NUMBER)) {
         // TODO(jesper): how do I distinguish between f32 and f64 in literals?
         expr = ALLOC_T(mem, AST) {
@@ -366,6 +376,11 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
             .literal.token = lexer->t,
             .literal.type = { T_FLOAT, 4 },
         };
+
+        if (!f32_from_string(lexer->t.str, &expr->literal.fval)) {
+            TERROR(lexer->t, "invalid float literal");
+            return nullptr;
+        }
     } else if (optional_identifier(lexer, "false") ||
                optional_identifier(lexer, "true"))
     {
@@ -374,6 +389,11 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
             .literal.token = lexer->t,
             .literal.type = { T_BOOL, 1 },
         };
+
+        if (!bool_from_string(lexer->t.str, &expr->literal.bval)) {
+            TERROR(lexer->t, "invalid boolean literal");
+            return nullptr;
+        }
     } else if (optional_token(lexer, TOKEN_IDENTIFIER)) {
         expr = ALLOC_T(mem, AST) {
             .type = AST_VAR_LOAD,
@@ -849,15 +869,44 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
         return llvm->ir->CreateLoad(var->getAllocatedType(), var, var->getName());
         } break;
     case AST_LITERAL: {
-        i64 val = i64_from_string(ast->literal.token.str);
-        switch (ast->literal.type.size) {
-        case 1: return llvm->ir->getInt8(val);
-        case 2: return llvm->ir->getInt16(val);
-        case 4: return llvm->ir->getInt32(val);
-        case 8: return llvm->ir->getInt64(val);
-        default:
-            PANIC("invalid integer size: %d", ast->literal.type.size);
-            return nullptr;
+        switch (ast->literal.type.type) {
+        case T_INTEGER:
+        case T_UNSIGNED:
+            switch (ast->literal.type.size) {
+            case 1: return llvm->ir->getInt8(ast->literal.ival);
+            case 2: return llvm->ir->getInt16(ast->literal.ival);
+            case 4: return llvm->ir->getInt32(ast->literal.ival);
+            case 8: return llvm->ir->getInt64(ast->literal.ival);
+            default:
+                PANIC("invalid integer size: %d", ast->literal.type.size);
+                return nullptr;
+            }
+            break;
+        case T_FLOAT:
+            switch (ast->literal.type.size) {
+            case 4:
+            case 8:
+                return llvm::ConstantFP::get(
+                    llvm_type_from_type_expr(&llvm->context, ast->literal.type),
+                    ast->literal.fval);
+            default:
+                PANIC("invalid float size: %d", ast->literal.type.size);
+                return nullptr;
+            }
+            break;
+        case T_BOOL:
+            switch (ast->literal.type.size) {
+            case 1: return llvm->ir->getInt1(ast->literal.bval);
+            default:
+                PANIC("invalid boolean size: %d", ast->literal.type.size);
+                return nullptr;
+            }
+            break;
+        case T_INVALID:
+        case T_UNKNOWN:
+        case T_VOID:
+            PANIC("invalid literal type");
+            break;
         }
         } break;
     case AST_BINARY_OP: {
