@@ -11,7 +11,7 @@
 #define DECLSPEC_ALLOCATOR __declspec(allocator)
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(LONG_PTR)-1)
-#define TIMEOUT_INFINITE 0xFFFFFFFF
+#define WIN32_INFINITE 0xFFFFFFFF
 #define WIN32_MAX_PATH 260
 
 #define GENERIC_READ                    0x80000000L
@@ -36,6 +36,9 @@
 #define FILE_ACTION_MODIFIED 0x00000003
 #define FILE_ACTION_REMOVED 0x00000002
 #define FILE_ACTION_ADDED 0x00000001
+
+#define FILE_NAME_NORMALIZED 0x0
+#define FILE_NAME_OPENED     0x8
 
 #define CREATE_NEW          1
 #define CREATE_ALWAYS       2
@@ -775,6 +778,17 @@ extern "C" {
         DWORD                 dwFlagsAndAttributes,
         HANDLE                hTemplateFile);
 
+    HANDLE CreateFileW(
+        LPCWSTR               lpFileName,
+        DWORD                 dwDesiredAccess,
+        DWORD                 dwShareMode,
+        LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+        DWORD                 dwCreationDisposition,
+        DWORD                 dwFlagsAndAttributes,
+        HANDLE                hTemplateFile
+    );
+
+
     BOOL DeleteFileA(LPCSTR lpFileName);
 
     BOOL WriteFile(
@@ -794,6 +808,7 @@ extern "C" {
     DWORD GetFileAttributesA(LPCSTR lpFileName);
     BOOL GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize);
     BOOL CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes);
+    BOOL CreateDirectoryW(LPCWSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes);
 
     BOOL GetFileTime(
         HANDLE     hFile,
@@ -805,6 +820,20 @@ extern "C" {
 
     HMODULE GetModuleHandleA(LPCSTR lpModuleName);
 
+    DWORD GetFinalPathNameByHandleA(
+        HANDLE hFile,
+        LPSTR lpszFilePath,
+        DWORD cchFilePath,
+        DWORD dwFlags
+    );
+
+    DWORD GetTempPathW(DWORD nBufferLength, LPWSTR lpBuffer);
+    UINT GetTempFileNameW(
+        LPCWSTR lpPathName,
+        LPCWSTR lpPrefixString,
+        UINT    uUnique,
+        LPWSTR  lpTempFileName
+    );
 }
 
 #endif // WIN32_LITE_H

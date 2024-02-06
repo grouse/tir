@@ -16,12 +16,15 @@ struct Process {
 Process* create_process(String exe, Array<String> args, ProcessOpts opts)
 {
     SArena scratch = tl_scratch_arena();
-    Process *p = ALLOC_T(mem_dynamic, Process);
+    Process *p = ALLOC_T(mem_dynamic, Process) {};
 
+    wchar_t *wsz_exe = nullptr;
     StringBuilder sb{ .alloc = scratch };
     if (extension_of(exe) == ".bat") {
         append_string(&sb, "/c");
-        exe = "c:\\windows\\system32\\cmd.exe";
+        wsz_exe = wsz_string("c:\\windows\\system32\\cmd.exe", scratch);
+    } else {
+        append_stringf(&sb, "%.*s ", STRFMT(exe));
     }
 
     for (i32 i = 0; i < args.count; i++) {
@@ -30,7 +33,6 @@ Process* create_process(String exe, Array<String> args, ProcessOpts opts)
     }
 
     String s_args = string(&sb, scratch);
-    wchar_t *wsz_exe = wsz_string(exe, scratch);
     wchar_t *wsz_args = wsz_string(s_args, scratch);
 
     HANDLE stdout_wr = NULL;
@@ -104,17 +106,16 @@ void release_process(Process *process)
     if (process) FREE(mem_dynamic, process);
 }
 
-bool wait_for_process(Process */*process*/, int */*exit_code*/)
+bool wait_for_process(Process *process, int *exit_code)
 {
-    LOG_ERROR("unimplemented");
-    return false;
+    WaitForSingleObject(process->process_handle, WIN32_INFINITE);
+    return get_exit_code(process, exit_code);
 }
 
 bool get_exit_code(Process *process, i32 *exit_code)
 {
     DWORD dw_exit_code;
     if (process && GetExitCodeProcess(process->process_handle, &dw_exit_code)) {
-        LOG_INFO("exit code: %d", dw_exit_code);
         if (exit_code) *exit_code = dw_exit_code;
         return true;
     }

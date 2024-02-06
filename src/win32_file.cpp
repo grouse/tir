@@ -5,6 +5,8 @@
 #include "string.h"
 #include "gen/string.h"
 
+#include <stdio.h>
+
 const char* win32_string_from_file_attribute(DWORD dwFileAttribute)
 {
     switch (dwFileAttribute) {
@@ -489,6 +491,63 @@ FileHandle open_file(String path, FileOpenMode mode)
 
     PANIC_IF(creation_mode == 0, "invalid creation mode");
     return win32_open_file(sz_path, creation_mode, GENERIC_WRITE|GENERIC_READ);
+}
+
+String file_path(FileHandle fh, Allocator mem)
+{
+    HANDLE handle = (HANDLE)fh;
+
+    DWORD length = GetFinalPathNameByHandleA(handle, NULL, 0, FILE_NAME_NORMALIZED);
+    if (length == 0) {
+        LOG_ERROR("unable to get final path name by handle: (%d) %s", WIN32_ERR_STR);
+        return {};
+    }
+
+    char *buffer = ALLOC_ARR(mem, char, length+1);
+    length = GetFinalPathNameByHandleA(handle, buffer, length+1, FILE_NAME_NORMALIZED);
+
+    String path{ buffer, (i32)length };
+    if (starts_with(path, "\\\\?\\")) path = slice(path, 4);
+    return path;
+}
+
+FileHandle create_temporary_file(const char *name, const char *suffix)
+{
+    SArena scratch = tl_scratch_arena();
+
+    DWORD temp_len = GetTempPathW(0, NULL);
+    wchar_t *temp_path = ALLOC_ARR(*scratch, wchar_t, temp_len+1);
+    GetTempPathW(temp_len, temp_path);
+
+    i32 prefix_len, suffix_len;
+    wchar_t *wsz_prefix = wsz_string(string(name), &prefix_len, scratch);
+    wchar_t *wsz_suffix = wsz_string(string(suffix), &suffix_len, scratch);
+
+    wchar_t wsz_path[WIN32_MAX_PATH];
+    memcpy(wsz_path, temp_path, temp_len*sizeof(wchar_t));
+    memcpy(wsz_path+temp_len-1, wsz_prefix, prefix_len*sizeof(wchar_t));
+
+    u16 uuid = (u16)wall_timestamp();
+
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    while (handle == INVALID_HANDLE_VALUE) {
+        wchar_t wsz_uuid[6];
+        i32 uuid_len = swprintf(wsz_uuid, ARRAY_COUNT(wsz_uuid), L"%llu", uuid);
+
+        wchar_t *ptr = wsz_path + temp_len-1 + prefix_len;
+        memcpy(ptr, wsz_uuid, uuid_len*sizeof(wchar_t));
+        ptr += uuid_len;
+
+        memcpy(ptr, wsz_suffix, suffix_len*sizeof(wchar_t));
+        ptr += suffix_len;
+
+        *ptr = '\0';
+
+        handle = win32_open_file(wsz_path, CREATE_NEW, GENERIC_WRITE|GENERIC_READ);
+        uuid += 1;
+    }
+
+    return handle;
 }
 
 void write_file(FileHandle handle, const char *data, i32 bytes)

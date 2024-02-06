@@ -18,7 +18,7 @@ Mutex* create_mutex()
 void lock_mutex(Mutex *m)
 {
     HANDLE h = (HANDLE)m;
-    WaitForSingleObject(h, TIMEOUT_INFINITE);
+    WaitForSingleObject(h, WIN32_INFINITE);
 }
 
 void unlock_mutex(Mutex *m)
