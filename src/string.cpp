@@ -1082,6 +1082,7 @@ bool parse_cmd_argument(String *args, i32 count, String name, i32 values[2])
 
 
 #if defined(_WIN32)
+
 i32 utf8_from_utf16(u8 *dst, i32 capacity, const wchar_t *src, i32 length)
 {
     static_assert(sizeof(wchar_t) == sizeof(u16));
@@ -1100,7 +1101,7 @@ i32 utf8_length(const wchar_t *str, i32 utf16_len)
     return utf8_length((const u16*)str, utf16_len);
 }
 
-wchar_t* wsz_string(String str, Allocator mem)
+wchar_t* wsz_string(String str, Allocator mem) EXPORT
 {
     i32 wl = utf16_length(str);
     if (wl == 0) return nullptr;
@@ -1108,6 +1109,19 @@ wchar_t* wsz_string(String str, Allocator mem)
     wchar_t *wsz_str = ALLOC_ARR(mem, wchar_t, wl+1);
     utf16_from_string((u16*)wsz_str, wl, str);
     wsz_str[wl] = L'\0';
+    return wsz_str;
+}
+
+wchar_t* wsz_string(String str, i32 *length, Allocator mem) EXPORT
+{
+    i32 wl = utf16_length(str);
+    if (wl == 0) return nullptr;
+
+    wchar_t *wsz_str = ALLOC_ARR(mem, wchar_t, wl+1);
+    utf16_from_string((u16*)wsz_str, wl, str);
+    wsz_str[wl] = L'\0';
+
+    *length = wl;
     return wsz_str;
 }
 #endif
