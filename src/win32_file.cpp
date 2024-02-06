@@ -108,6 +108,54 @@ FileInfo read_file(String path, Allocator mem, i32 retry_count)
     return fi;
 }
 
+HANDLE win32_open_file(wchar_t *wsz_path, u32 creation_mode, u32 access_mode)
+{
+    HANDLE file = CreateFileW(
+        wsz_path,
+        access_mode,
+        0,
+        nullptr,
+        creation_mode,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+
+    if (file == INVALID_HANDLE_VALUE &&
+        (creation_mode == CREATE_ALWAYS ||
+         creation_mode == CREATE_NEW))
+    {
+        DWORD code = GetLastError();
+        if (code == 3) {
+            wchar_t *ptr = wsz_path;
+            wchar_t *end = ptr + wcslen(ptr);
+
+            while (ptr < end) {
+                if (*ptr == '\\' || *ptr == '/') {
+                    char c = *ptr;
+                    *ptr = '\0';
+                    defer{ *ptr = c; };
+
+                    if (CreateDirectoryW(wsz_path, NULL) == 0) {
+                        DWORD create_dir_error = GetLastError();
+                        if (create_dir_error != ERROR_ALREADY_EXISTS) {
+                            LOG_ERROR("failed creating folder: %ls, code: %d, msg: '%s'",
+                                      wsz_path,
+                                      create_dir_error,
+                                      win32_system_error_message(create_dir_error));
+                            return INVALID_HANDLE_VALUE;
+                        }
+                    }
+                }
+                ptr++;
+            }
+        } else {
+            LOG_ERROR("failed creating file: '%ls', code: %d, msg: '%s'", wsz_path, code, win32_system_error_message(code));
+            return INVALID_HANDLE_VALUE;
+        }
+    }
+
+    return file;
+}
+
 HANDLE win32_open_file(char *sz_path, u32 creation_mode, u32 access_mode)
 {
     HANDLE file = CreateFileA(
