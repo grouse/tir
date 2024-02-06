@@ -6,6 +6,7 @@ config("compiler") {
     defines = []
     configs = []
     include_dirs = [ "//" ]
+    lib_dirs = []
 
     if (is_win) {
         defines += ["_CRT_SECURE_NO_WARNINGS"]

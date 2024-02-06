@@ -23,6 +23,10 @@
 #include <llvm/TargetParser/Host.h>
 #include <llvm/MC/TargetRegistry.h>
 
+#ifdef _WIN32
+#define strdup _strdup
+#endif
+
 // TODO(jesper): it's broken and doesn't work and I've no idea what LLVM expects the implementation to do because the documentation is absolutely garbage
 class raw_file_ostream : public llvm::raw_pwrite_stream {
   void write_impl(const char *ptr, size_t size) override
@@ -1159,17 +1163,17 @@ int main(int argc, char *argv[])
     {
         SArena scratch = tl_scratch_arena();
 
-        llvm::InitializeAllTargetInfos();
-        llvm::InitializeAllTargets();
-        llvm::InitializeAllTargetMCs();
-        llvm::InitializeAllAsmParsers();
-        llvm::InitializeAllAsmPrinters();
+        LLVMInitializeX86TargetInfo();
+        LLVMInitializeX86Target();
+        LLVMInitializeX86TargetMC();
+        LLVMInitializeX86AsmParser();
+        LLVMInitializeX86AsmPrinter();
 
         std::string target_triple = llvm::sys::getDefaultTargetTriple();
 
         std::string error;
         auto *target = llvm::TargetRegistry::lookupTarget(target_triple, error);
-        if (!target) LOG_ERROR("Failed to lookup target: %s", error.c_str());
+        if (!target) LOG_ERROR("Failed to lookup target for triple '%s': %s", target_triple.c_str(), error.c_str());
 
         llvm::TargetOptions target_opts{};
         auto *target_machine = target->createTargetMachine(
@@ -1191,12 +1195,18 @@ int main(int argc, char *argv[])
             path = file_path(fd, mem_dynamic);
         }
 
-        defer { close_file(fd); };
+        defer { if(fd) close_file(fd); };
 
-#if 0
+#if defined(_WIN32)
+        // TODO(jesper): mega hacky. I need to figure out how to use llvm's file io properly to write a custom one using my file io procs
+        close_file(fd); fd = 0;
+
         std::error_code ec;
         llvm::raw_fd_ostream out{ sz_string(path, scratch), ec };
-#elif 1
+#elif 0
+        std::error_code ec;
+        llvm::raw_fd_ostream out{ sz_string(path, scratch), ec };
+#elif 0
         llvm::raw_fd_ostream out{ (int)(i64)fd, false };
 #else
         raw_file_ostream out{ fd };
@@ -1206,7 +1216,7 @@ int main(int argc, char *argv[])
         target_machine->addPassesToEmitFile(
             pass_manager,
             out, nullptr,
-            llvm::CGFT_ObjectFile);
+            llvm::CodeGenFileType::ObjectFile);
 
         pass_manager.run(*llvm.module);
         array_add(&object_files, path);
@@ -1218,8 +1228,14 @@ int main(int argc, char *argv[])
         SArena scratch = tl_scratch_arena();
         DynamicArray<String> args{ .alloc = scratch };
 
+#if defined(_WIN32)
+        String exe_name = stringf(scratch, "%s/%s.exe", out_dir, out_name);
+#elif defined(__linux__)
+        String exe_name = stringf(scratch, "%s/%s", out_dir, out_name);
+#endif
+
         array_add(&args, object_files);
-        array_add(&args, { String{ "-o" }, stringf(scratch, "%s/%s", out_dir, out_name) });
+        array_add(&args, { String{ "-o" }, exe_name });
 
         run_process("clang", args);
     }
