@@ -621,6 +621,13 @@ TypeExpr ast_typecheck(AST *ast, TypeExpr parent, Module *module, AST *proc)
             }
         }
 
+        if (ast->var_decl.type == T_INTEGER) {
+            TERROR(ast->var_decl.identifier,
+                   "cannot infer signage of integer variable, '%.*s'",
+                   STRFMT(ast->var_decl.identifier.str));
+            return { T_INVALID };
+        }
+
         if (ast->var_decl.type == T_UNKNOWN) {
             TERROR(ast->var_decl.identifier,
                    "cannot infer type of '%.*s'",
@@ -668,7 +675,10 @@ TypeExpr ast_typecheck(AST *ast, TypeExpr parent, Module *module, AST *proc)
         if (ast->literal.type == T_INTEGER) {
             if (parent == T_SIGNED || parent == T_UNSIGNED)
                 ast->literal.type.prim = parent.prim;
+            else if (parent == T_UNKNOWN)
+                ast->literal.type.prim = T_SIGNED;
         }
+
         return ast->literal.type;
     case AST_BINARY_OP: {
         TypeExpr lhs = ast_typecheck(ast->binary_op.lhs, parent, module, proc);
@@ -692,25 +702,25 @@ TypeExpr ast_typecheck(AST *ast, TypeExpr parent, Module *module, AST *proc)
     return { T_UNKNOWN };
 }
 
-i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
+TypeExpr ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
 {
     switch (ast->type) {
     case AST_VAR_LOAD: {
         Symbol *sym = map_find(&module->symbols, ast->var_load.identifier.str);
         if (!sym) {
             TERROR(ast->var_load.identifier, "Unknown variable '%.*s'", STRFMT(ast->var_load.identifier.str));
-            return -1;
+            return { T_INVALID };
         }
 
         if (sym->type != SYM_VARIABLE) {
             TERROR(ast->var_load.identifier,
                    "symbol '%.*s' is not a variable",
                    STRFMT(ast->var_load.identifier.str));
-            return -1;
+            return { T_INVALID };
         }
 
         if (sym->variable.type.size == 0) sym->variable.type.size = topdown_size;
-        return sym->variable.type.size;
+        return sym->variable.type;
         } break;
     case AST_VAR_STORE: {
         Symbol *sym = map_find(&module->symbols, ast->var_store.identifier.str);
@@ -718,77 +728,86 @@ i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
             TERROR(ast->var_load.identifier,
                    "unknown variable '%.*s'",
                    STRFMT(ast->var_load.identifier.str));
-            return -1;
+            return { T_INVALID };
         }
 
         if (sym->type != SYM_VARIABLE) {
             TERROR(ast->var_load.identifier,
                    "symbol '%.*s' is not a variable",
                    STRFMT(ast->var_load.identifier.str));
-            return -1;
+            return { T_INVALID };
         }
 
-        i32 rhs = ast_sizecheck(ast->var_store.rhs, module, proc, sym->variable.type.size);
+        TypeExpr rhs = ast_sizecheck(ast->var_store.rhs, module, proc, sym->variable.type.size);
 
-        if (sym->variable.type.size == 0) sym->variable.type.size = rhs;
-        if (rhs != 0 && rhs != sym->variable.type.size) {
+        if (sym->variable.type.size == 0) sym->variable.type.size = rhs.size;
+        if (rhs.size != 0 && rhs.size != sym->variable.type.size) {
             TERROR(ast->var_store.identifier,
                    "sizing mismtach in variable store, declared as [%s:%d], rhs requires deduced as size %d",
                    sz_from_enum(sym->variable.type.prim), sym->variable.type.size,
                    rhs);
-            return -1;
+            return { T_INVALID };
         }
 
-        return sym->variable.type.size;
+        return sym->variable.type;
         } break;
     case AST_INVALID:
         PANIC_UNREACHABLE();
         break;
     case AST_VAR_DECL:
         if (ast->var_decl.init) {
-            i32 init_size = ast_sizecheck(ast->var_decl.init, module, proc, ast->var_decl.type.size);
+            TypeExpr init_type = ast_sizecheck(ast->var_decl.init, module, proc, ast->var_decl.type.size);
 
             if (ast->var_decl.type.size == 0) {
-                ast->var_decl.type.size = init_size;
+                ast->var_decl.type.size = init_type.size;
             }
 
-            if (init_size != 0 && init_size != ast->var_decl.type.size) {
+            if (init_type.size != 0 && init_type.size > ast->var_decl.type.size) {
                 TERROR(ast->var_decl.identifier,
-                       "size mismatch in variable declaration, declared as [%s:%d], initialized deduced as type %d",
+                       "size mismatch in variable declaration, declared as [%s:%d], initialization expression deduced as [%s:%d]",
                        sz_from_enum(ast->var_decl.type.prim), ast->var_decl.type.size,
-                       init_size);
+                       sz_from_enum(init_type.prim), init_type.size);
+                return { T_INVALID };
             }
         } else if (ast->var_decl.type.size == 0) {
             TERROR(ast->var_decl.identifier, "unable to infer size, variable declaration require either an explicit type, or an assignment expression to automatically deduce type from");
+            return { T_INVALID };
         }
 
-        return ast->var_decl.type.size;
+        return ast->var_decl.type;
     case AST_LITERAL:
         if (ast->literal.type.size == 0)
             ast->literal.type.size = topdown_size;
 
-        if (ast->literal.type.size == 0 &&
-            (ast->literal.type == T_INTEGER ||
-             ast->literal.type == T_SIGNED ||
-             ast->literal.type == T_UNSIGNED))
-        {
-            // TODO(jesper): I want to do more checking here to determine the smallest size required by the expression (which in the case of integer literals, depend on the size of the literal size itself), and propagate that information both upwards and sideways to other expressions, but I'm not sure how to do that yet.
-            ast->literal.type.size = 4;
+        if (ast->literal.type.size == 0 && ast->literal.type == T_SIGNED) {
+            i64 ival = ast->literal.ival;
+            if (ival <= i8_MAX && ival >= i8_MIN) ast->literal.type.size = 1;
+            else if (ival <= i16_MAX && ival >= i16_MIN) ast->literal.type.size = 2;
+            else if (ival <= i32_MAX && ival >= i32_MIN) ast->literal.type.size = 4;
+            else ast->literal.type.size = 8;
+        }
+
+        if (ast->literal.type.size == 0 && ast->literal.type == T_UNSIGNED) {
+            u64 uval = ast->literal.ival;
+            if (uval <= u8_MAX) ast->literal.type.size = 1;
+            else if (uval <= u16_MAX) ast->literal.type.size = 2;
+            else if (uval <= u32_MAX) ast->literal.type.size = 4;
+            else ast->literal.type.size = 8;
         }
 
         if (ast->literal.type.size == 0) {
             TERROR(ast->literal.token, "cannot infer size of '%.*s'", STRFMT(ast->literal.token.str));
         }
-        return ast->literal.type.size;
+        return ast->literal.type;
     case AST_BINARY_OP: {
-        i32 lhs = ast_sizecheck(ast->binary_op.lhs, module, proc, topdown_size);
-        i32 rhs = ast_sizecheck(ast->binary_op.rhs, module, proc, lhs);
+        TypeExpr lhs = ast_sizecheck(ast->binary_op.lhs, module, proc, topdown_size);
+        TypeExpr rhs = ast_sizecheck(ast->binary_op.rhs, module, proc, lhs.size);
 
-        if (lhs == 0 && rhs != 0) {
-            lhs = ast_sizecheck(ast->binary_op.lhs, module, proc, rhs);
+        if (lhs.size == 0 && rhs.size != 0) {
+            lhs = ast_sizecheck(ast->binary_op.lhs, module, proc, rhs.size);
         }
 
-        if (lhs != rhs) {
+        if (lhs.size != rhs.size) {
             // TODO(jesper): check for implicit conversion
             TERROR(ast->binary_op.op,
                    "size mismatch in binary operation, lhs %d, rhs %d",
@@ -799,32 +818,34 @@ i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
         return lhs;
         } break;
     case AST_PROC_DECL:
-        for (AST *stmt = ast->proc.body; stmt; stmt = stmt->next)
-            ast_sizecheck(stmt, module, ast);
+        for (AST *stmt = ast->proc.body; stmt; stmt = stmt->next) {
+            if (ast_sizecheck(stmt, module, ast) == T_INVALID)
+                return { T_INVALID };
+        }
 
-        // TODO(jesper): proc type size?
-        return 0;
+        return ast->proc.ret_type;
     case AST_RETURN: {
         PANIC_IF(!proc || proc->type != AST_PROC_DECL, "expected AST_PROC_DECL");
-        i32 ret_size = proc->proc.ret_type.size;
+
+        TypeExpr ret_type = proc->proc.ret_type;
         if (ast->ret.expr)
-            ret_size = ast_sizecheck(ast->ret.expr, module, proc, ret_size);
+            ret_type = ast_sizecheck(ast->ret.expr, module, proc, ret_type.size);
 
         if (proc->proc.ret_type.size == 0 &&
             proc->proc.ret_type != T_VOID)
         {
-            proc->proc.ret_type.size = ret_size;
+            proc->proc.ret_type.size = ret_type.size;
         }
 
-        if (ret_size != proc->proc.ret_type.size) {
+        if (ret_type.size != proc->proc.ret_type.size) {
             TERROR(ast->ret.token, "size mismatch in return statement");
         }
 
-        return ret_size;
+        return ret_type;
         } break;
     }
 
-    return 0;
+    return { T_UNKNOWN };
 }
 
 llvm::AllocaInst* llvm_create_scoped_var(
@@ -1155,7 +1176,7 @@ int main(int argc, char *argv[])
     }
 
     for (AST *ast = module.ast; ast; ast = ast->next) {
-        if (ast_sizecheck(ast, &module, nullptr) == -1)
+        if (ast_sizecheck(ast, &module, nullptr) == T_INVALID)
             return -1;
     }
 

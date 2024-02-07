@@ -76,11 +76,16 @@ constexpr f32 f32_PI = (f32)f64_PI;
 #define f32_INF ((f32)(1e+300*1e+300))
 
 #define i32_MAX (i32)0x7FFFFFFF
+#define i32_MIN (i32)0x80000000
 #define u32_MAX (u32)0xFFFFFFFF
 
 #define i16_MAX (i16)0x7FFF
+#define i16_MIN (i16)0x8000
 #define u16_MAX (u16)0xFFFF
 
+#define i8_MAX (i8)0x7F
+#define i8_MIN (i8)0x80
+#define u8_MAX (u8)0xFF
 
 static_assert(sizeof(u64) == 8);
 static_assert(sizeof(i64) == 8);
