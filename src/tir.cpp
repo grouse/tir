@@ -523,20 +523,42 @@ AST* parse_statement(Lexer *lexer, Allocator mem) INTERNAL
 
 AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
 {
+    Lexer stored = *lexer;
+
     if (lexer->t.type != TOKEN_IDENTIFIER) return nullptr;
     Token identifier = lexer->t;
 
-    // TODO(jesper): this meains `main :\s*: ()` is valid syntax, should it be?
-    if (peek_token(lexer) == ':' &&
-        peek_nth_token(lexer, 2) == ':')
-    {
-        if (peek_nth_token(lexer, 3) == '(') {
-            next_nth_token(lexer, 3);
 
+    // TODO(jesper): this meains `main :\s*: ()` is valid syntax, should it be?
+    if (optional_token(lexer, ':') && optional_token(lexer, ':')) {
+        if (optional_token(lexer, '(')) {
             if (!require_next_token(lexer, ')')) {
                 PARSE_ERROR(lexer, "expected ')'");
                 return nullptr;
             }
+
+            TypeExpr ret_type { T_UNKNOWN };
+            if (optional_token(lexer, '-')) {
+                if (!require_next_token(lexer, '>')) {
+                    PARSE_ERROR(lexer, "expected '->' after parameter list");
+                    return nullptr;
+                }
+
+                ret_type = parse_type_expression(lexer);
+                if (ret_type == T_UNKNOWN) {
+                    PARSE_ERROR(lexer, "missing explicit type expression for return type; add appropriate return type or remove the '->' for implicit retun type deduction");
+                    return nullptr;
+                }
+
+                if (ret_type == T_INVALID) {
+                    PARSE_ERROR(
+                        lexer,
+                        "invalid type expression for return type: '%.*s'",
+                        STRFMT(lexer->t.str));
+                    return nullptr;
+                }
+            }
+
 
             AST *body = parse_statement(lexer, mem);
             if (!body) {
@@ -548,10 +570,12 @@ AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
                 .type = AST_PROC_DECL,
                 .proc.identifier = identifier,
                 .proc.body = body,
+                .proc.ret_type = ret_type,
             };
         }
     }
 
+    *lexer = stored;
     return nullptr;
 }
 
