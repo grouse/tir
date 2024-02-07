@@ -111,6 +111,7 @@ enum PrimitiveType : i32 {
     T_VOID,
     T_INTEGER,
     T_UNSIGNED,
+    T_SIGNED,
     T_FLOAT,
     T_BOOL,
 };
@@ -121,6 +122,7 @@ const char* sz_from_enum(PrimitiveType type)
     case T_UNKNOWN:  return "unknown";
     case T_VOID:     return "void";
     case T_INTEGER:  return "INT";
+    case T_SIGNED:   return "SINT";
     case T_UNSIGNED: return "UINT";
     case T_FLOAT:    return "FLOAT";
     case T_BOOL:     return "BOOL";
@@ -147,6 +149,9 @@ llvm::Type * llvm_type_from_type_expr(llvm::LLVMContext *context, TypeExpr type)
     case T_VOID:
         return llvm::Type::getVoidTy(*context);
     case T_INTEGER:
+        PANIC("undetermined signage of integer");
+        return nullptr;
+    case T_SIGNED:
         switch (type.size) {
         case 1: return llvm::Type::getInt8Ty(*context);
         case 2: return llvm::Type::getInt16Ty(*context);
@@ -373,6 +378,8 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
             TERROR(lexer->t, "invalid integer literal");
             return nullptr;
         }
+
+        if (expr->literal.ival < 0) expr->literal.type.prim = T_SIGNED;
     } else if (optional_token(lexer, TOKEN_NUMBER)) {
         // TODO(jesper): how do I distinguish between f32 and f64 in literals?
         expr = ALLOC_T(mem, AST) {
@@ -430,10 +437,10 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
 TypeExpr parse_type_expression(Lexer *lexer)
 {
     if (optional_token(lexer, TOKEN_IDENTIFIER)) {
-        if (lexer->t == "i8")  return { T_INTEGER,  1 };
-        if (lexer->t == "i16") return { T_INTEGER,  2 };
-        if (lexer->t == "i32") return { T_INTEGER,  4 };
-        if (lexer->t == "i64") return { T_INTEGER,  8 };
+        if (lexer->t == "i8")  return { T_SIGNED,  1 };
+        if (lexer->t == "i16") return { T_SIGNED,  2 };
+        if (lexer->t == "i32") return { T_SIGNED,  4 };
+        if (lexer->t == "i64") return { T_SIGNED,  8 };
 
         if (lexer->t == "u8")  return { T_UNSIGNED, 1 };
         if (lexer->t == "u16") return { T_UNSIGNED, 2 };
@@ -548,7 +555,7 @@ AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
     return nullptr;
 }
 
-TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
+TypeExpr ast_typecheck(AST *ast, TypeExpr parent, Module *module, AST *proc)
 {
     switch (ast->type) {
     case AST_VAR_LOAD: {
@@ -586,7 +593,7 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
         }
 
         TypeExpr lhs = sym->variable.type;
-        TypeExpr rhs = ast_typecheck(ast->var_store.rhs, module, proc);
+        TypeExpr rhs = ast_typecheck(ast->var_store.rhs, lhs, module, proc);
         if (lhs != rhs) {
 
             // TODO(jesper): implicit/explicit conversion rules
@@ -601,7 +608,7 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
         } break;
     case AST_VAR_DECL:
         if (ast->var_decl.init) {
-            TypeExpr init_type = ast_typecheck(ast->var_decl.init, module, proc);
+            TypeExpr init_type = ast_typecheck(ast->var_decl.init, ast->var_decl.type, module, proc);
             if (ast->var_decl.type == T_UNKNOWN) {
                 ast->var_decl.type = init_type;
             } else if (init_type.prim != ast->var_decl.type.prim) {
@@ -629,15 +636,19 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
 
         return ast->var_decl.type;
     case AST_PROC_DECL:
-        for (AST *stmt = ast->proc.body; stmt; stmt = stmt->next)
-            ast_typecheck(stmt, module, ast);
+        for (AST *stmt = ast->proc.body; stmt; stmt = stmt->next) {
+            if (ast_typecheck(stmt, ast->proc.ret_type, module, ast) == T_INVALID)
+                return { T_INVALID };
+        }
 
-        // TODO(jesper): proc type expr
-        return { T_UNKNOWN };
+        // TODO(jesper): proc type expr?
+        return ast->proc.ret_type;
     case AST_RETURN: {
         PANIC_IF(!proc || proc->type != AST_PROC_DECL, "expected AST_PROC_DECL");
+
         TypeExpr ret_type = { T_VOID };
-        if (ast->ret.expr) ret_type = ast_typecheck(ast->ret.expr, module, proc);
+        // TODO(jesper): I don't think this is correct, but I need to add more conversion rules and explicit return type syntax before really testing this further
+        if (ast->ret.expr) ret_type = ast_typecheck(ast->ret.expr, { T_SIGNED }, module, proc);
 
         if (proc->proc.ret_type == T_UNKNOWN)
             proc->proc.ret_type = ret_type;
@@ -654,10 +665,14 @@ TypeExpr ast_typecheck(AST *ast, Module *module, AST *proc)
         return ret_type;
         } break;
     case AST_LITERAL:
+        if (ast->literal.type == T_INTEGER) {
+            if (parent == T_SIGNED || parent == T_UNSIGNED)
+                ast->literal.type.prim = parent.prim;
+        }
         return ast->literal.type;
     case AST_BINARY_OP: {
-        TypeExpr lhs = ast_typecheck(ast->binary_op.lhs, module, proc);
-        TypeExpr rhs = ast_typecheck(ast->binary_op.rhs, module, proc);
+        TypeExpr lhs = ast_typecheck(ast->binary_op.lhs, parent, module, proc);
+        TypeExpr rhs = ast_typecheck(ast->binary_op.rhs, parent, module, proc);
 
         if (lhs.prim != rhs.prim) {
             TERROR(ast->binary_op.op,
@@ -754,6 +769,7 @@ i32 ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0)
 
         if (ast->literal.type.size == 0 &&
             (ast->literal.type == T_INTEGER ||
+             ast->literal.type == T_SIGNED ||
              ast->literal.type == T_UNSIGNED))
         {
             // TODO(jesper): I want to do more checking here to determine the smallest size required by the expression (which in the case of integer literals, depend on the size of the literal size itself), and propagate that information both upwards and sideways to other expressions, but I'm not sure how to do that yet.
@@ -874,6 +890,9 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
     case AST_LITERAL: {
         switch (ast->literal.type.prim) {
         case T_INTEGER:
+            PANIC("undeterminate signage of integer");
+            break;
+        case T_SIGNED:
         case T_UNSIGNED:
             switch (ast->literal.type.size) {
             case 1: return llvm->ir->getInt8(ast->literal.ival);
@@ -1131,11 +1150,13 @@ int main(int argc, char *argv[])
     }
 
     for (AST *ast = module.ast; ast; ast = ast->next) {
-        ast_typecheck(ast, &module, nullptr);
+        if (ast_typecheck(ast, { T_INVALID }, &module, nullptr) == T_INVALID)
+            return -1;
     }
 
     for (AST *ast = module.ast; ast; ast = ast->next) {
-        ast_sizecheck(ast, &module, nullptr);
+        if (ast_sizecheck(ast, &module, nullptr) == -1)
+            return -1;
     }
 
     debug_print_ast(module.ast);
@@ -1206,7 +1227,7 @@ int main(int argc, char *argv[])
 #elif 0
         std::error_code ec;
         llvm::raw_fd_ostream out{ sz_string(path, scratch), ec };
-#elif 0
+#elif 1
         llvm::raw_fd_ostream out{ (int)(i64)fd, false };
 #else
         raw_file_ostream out{ fd };
@@ -1216,7 +1237,7 @@ int main(int argc, char *argv[])
         target_machine->addPassesToEmitFile(
             pass_manager,
             out, nullptr,
-            llvm::CodeGenFileType::ObjectFile);
+            llvm::CGFT_ObjectFile);
 
         pass_manager.run(*llvm.module);
         array_add(&object_files, path);
