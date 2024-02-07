@@ -31,6 +31,21 @@ Token next_token(Lexer *lexer, u32 flags) EXPORT
 
             t.str.length = (i32)(lexer->ptr - t.str.data);
             if (flags & LEXER_NEWLINE) return t;
+        } else if (lexer->ptr + 2 < lexer->end &&
+                   lexer->ptr[0] == '/' && lexer->ptr[1] == '/')
+        {
+            t.type = TOKEN_COMMENT;
+            t.str.data = lexer->ptr = lexer->ptr+2;
+
+            while (lexer->ptr < lexer->end &&
+                lexer->ptr[0] != '\n' && lexer->ptr[0] != '\r')
+            {
+                lexer->ptr++;
+                lexer->col++;
+            }
+
+            t.str.length = (i32)(lexer->ptr - t.str.data);
+            if (flags & LEXER_COMMENT) return t;
         } else if ((*lexer->ptr >= '0' && *lexer->ptr <= '9') ||
                    (lexer->ptr+1 < lexer->end && *lexer->ptr == '-' && *(lexer->ptr+1) >= '0' && *(lexer->ptr+1) <= '9'))
         {
