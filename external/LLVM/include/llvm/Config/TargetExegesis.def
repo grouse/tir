@@ -24,9 +24,6 @@
 #  error Please define the macro LLVM_EXEGESIS(TargetName)
 #endif
 
-LLVM_EXEGESIS(AArch64)
-LLVM_EXEGESIS(Mips)
-LLVM_EXEGESIS(PowerPC)
 LLVM_EXEGESIS(X86)
 
 

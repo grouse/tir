@@ -32,51 +32,7 @@ executable("tir") {
         lib_dirs += [ "//external/LLVM/lib/win64" ]
         include_dirs += [ "//external/LLVM/include" ]
 
-        libs += [
-            "LLVMAnalysis",
-            "LLVMCore",
-            "LLVMSupport",
-            "LLVMTarget",
-            "LLVMTargetParser",
-            "LLVMBinaryFormat",
-            "LLVMMCA",
-            "LLVMSelectionDAG",
-            "LLVMGlobalISel",
-            "LLVMCFGuard",
-            "LLVMAsmPrinter",
-            "LLVMAsmParser",
-            "LLVMTransformUtils",
-            "LLVMIRPrinter",
-            "LLVMIRReader",
-            "LLVMScalarOpts",
-            "LLVMProfileData",
-            "LLVMInstrumentation",
-            "LLVMDebugInfoCodeView",
-            "LLVMDebugInfoDWARF",
-            "LLVMObject",
-            "LLVMTextAPI",
-            "LLVMObjCARCOpts",
-
-            "LLVMMC",
-            "LLVMMCParser",
-            "LLVMMCDisassembler",
-
-            "LLVMDemangle",
-            "LLVMRemarks",
-
-            "LLVMBitReader",
-            "LLVMBitStreamReader",
-            "LLVMBitWriter",
-
-            "LLVMCodeGen",
-            "LLVMCodeGenTypes",
-
-            "LLVMX86Info",
-            "LLVMX86AsmParser",
-            "LLVMX86Desc",
-            "LLVMX86CodeGen",
-            "LLVMX86TargetMCA",
-        ]
+        libs += [ "LLVM-C" ]
     } else if (current_os == "linux") {
         include_dirs += [ "/usr/lib/llvm-16/include" ]
         libs += [ "LLVM-16" ]

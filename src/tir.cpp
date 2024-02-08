@@ -11,51 +11,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/NoFolder.h>
-#include <llvm/IR/LegacyPassManager.h>
-#include <llvm/Support/TargetSelect.h>
-#include <llvm/Support/FileSystem.h>
-#include <llvm/Support/CodeGen.h>
-#include <llvm/Target/TargetOptions.h>
-#include <llvm/Target/TargetMachine.h>
-#include <llvm/TargetParser/Host.h>
-#include <llvm/MC/TargetRegistry.h>
+#include <llvm-c/Core.h>
+#include <llvm-c/Target.h>
+#include <llvm-c/TargetMachine.h>
 
 #ifdef _WIN32
 #define strdup _strdup
 #endif
-
-// TODO(jesper): it's broken and doesn't work and I've no idea what LLVM expects the implementation to do because the documentation is absolutely garbage
-class raw_file_ostream : public llvm::raw_pwrite_stream {
-  void write_impl(const char *ptr, size_t size) override
-  {
-      LOG_INFO("write %p %lld", ptr, size);
-      write_file(file, ptr, size);
-  }
-
-  void pwrite_impl(const char *ptr, size_t size, uint64_t offset) override
-  {
-      LOG_INFO("pwrite %p %lld %lld", ptr, size, offset);
-      seek_file(file, offset);
-      write_file(file, ptr, size);
-  }
-
-  uint64_t current_pos() const override
-  {
-      u64 pos = file_offset(file);
-      LOG_INFO("current_pos: %lld", pos);
-      return pos;
-  }
-
-public:
-  FileHandle file;
-
-  raw_file_ostream(FileHandle file) : file(file) {}
-  ~raw_file_ostream() {}
-
-};
 
 enum Keyword : i32 {
     KW_INVALID = 0,
@@ -141,45 +103,45 @@ struct TypeExpr {
     bool operator==(const PrimitiveType &rhs) const { return prim == rhs; }
 };
 
-llvm::Type * llvm_type_from_type_expr(llvm::LLVMContext *context, TypeExpr type)
+LLVMTypeRef llvm_type_from_type_expr(LLVMContextRef context, TypeExpr type)
 {
     switch (type.prim) {
     case T_INVALID: break;
     case T_UNKNOWN: break;
     case T_VOID:
-        return llvm::Type::getVoidTy(*context);
+        return LLVMVoidType();
     case T_INTEGER:
         PANIC("undetermined signage of integer");
         return nullptr;
     case T_SIGNED:
         switch (type.size) {
-        case 1: return llvm::Type::getInt8Ty(*context);
-        case 2: return llvm::Type::getInt16Ty(*context);
-        case 4: return llvm::Type::getInt32Ty(*context);
-        case 8: return llvm::Type::getInt64Ty(*context);
+        case 1: return LLVMInt8Type();
+        case 2: return LLVMInt16Type();
+        case 4: return LLVMInt32Type();
+        case 8: return LLVMInt64Type();
         default: PANIC("Invalid integer size %d", type.size);
         }
         break;
     case T_UNSIGNED:
         // TODO(jesper): how does LLVM distinguish between signed and unsigned types?
         switch (type.size) {
-        case 1: return llvm::Type::getInt8Ty(*context);
-        case 2: return llvm::Type::getInt16Ty(*context);
-        case 4: return llvm::Type::getInt32Ty(*context);
-        case 8: return llvm::Type::getInt64Ty(*context);
+        case 1: return LLVMInt8Type();
+        case 2: return LLVMInt16Type();
+        case 4: return LLVMInt32Type();
+        case 8: return LLVMInt64Type();
         default: PANIC("Invalid unsignd integer size %d", type.size);
         }
         break;
     case T_FLOAT:
         switch (type.size) {
-        case 4: return llvm::Type::getFloatTy(*context);
-        case 8: return llvm::Type::getDoubleTy(*context);
+        case 4: return LLVMFloatType();
+        case 8: return LLVMDoubleType();
         default: PANIC("invalid float size: %d", type.size);
         }
         break;
     case T_BOOL:
         switch (type.size) {
-        case 1: return llvm::Type::getInt1Ty(*context);
+        case 1: return LLVMInt1Type();
         default: PANIC("invalid bool size: %d", type.size);
         }
         break;
@@ -254,14 +216,14 @@ struct Module {
 
 
 struct Scope {
-    llvm::BasicBlock *entry;
-    HashTable<String, llvm::AllocaInst*> variables;
+    LLVMBasicBlockRef entry;
+    HashTable<String, LLVMValueRef> variables;
 };
 
 struct LLVMIR {
-    llvm::LLVMContext context;
-    llvm::IRBuilder<llvm::NoFolder> *ir;
-    llvm::Module *module;
+    LLVMContextRef context;
+    LLVMBuilderRef ir;
+    LLVMModuleRef module;
 
     Scope scope;
 };
@@ -872,40 +834,40 @@ TypeExpr ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0
     return { T_UNKNOWN };
 }
 
-llvm::AllocaInst* llvm_create_scoped_var(
+LLVMValueRef llvm_create_scoped_var(
+    LLVMIR *llvm,
     Scope *scope,
-    llvm::Type *type,
+    LLVMTypeRef type,
     String name)
 {
     SArena scratch = tl_scratch_arena();
 
-    llvm::IRBuilder<> ir(scope->entry, scope->entry->begin());
-    auto *var = ir.CreateAlloca(type, nullptr, sz_string(name, scratch));
+    LLVMValueRef var = LLVMBuildAlloca(llvm->ir, type, sz_string(name, scratch));
     map_set(&scope->variables, name, var);
 
     return var;
 }
 
-llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
+LLVMValueRef llvm_codegen_expr(LLVMIR *llvm, AST *ast)
 {
     SArena scratch = tl_scratch_arena();
 
     switch (ast->type) {
     case AST_VAR_DECL: {
-        llvm::AllocaInst *var = llvm_create_scoped_var(
-            &llvm->scope,
-            llvm_type_from_type_expr(&llvm->context, ast->var_decl.type),
+        LLVMValueRef var = llvm_create_scoped_var(
+            llvm, &llvm->scope,
+            llvm_type_from_type_expr(llvm->context, ast->var_decl.type),
             ast->var_decl.identifier.str);
 
         if (ast->var_decl.init) {
-            llvm::Value *init = llvm_codegen_expr(llvm, ast->var_decl.init);
-            llvm->ir->CreateStore(init, var);
+            LLVMValueRef init = llvm_codegen_expr(llvm, ast->var_decl.init);
+            return LLVMBuildStore(llvm->ir, init, var);
         } else {
             // TODO(jesper): default init value
         }
         } break;
     case AST_VAR_STORE: {
-        llvm::AllocaInst **it = map_find(
+        LLVMValueRef *it = map_find(
             &llvm->scope.variables,
             ast->var_store.identifier.str);
 
@@ -914,13 +876,11 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
             return nullptr;
         }
 
-        llvm::AllocaInst *var = *it;
-        llvm::Value *rhs = llvm_codegen_expr(llvm, ast->var_store.rhs);
-
-        return llvm->ir->CreateStore(rhs, var);
+        LLVMValueRef rhs = llvm_codegen_expr(llvm, ast->var_store.rhs);
+        return LLVMBuildStore(llvm->ir, rhs, *it);
         } break;
     case AST_VAR_LOAD: {
-        llvm::AllocaInst **it = map_find(
+        LLVMValueRef *it = map_find(
             &llvm->scope.variables,
             ast->var_load.identifier.str);
 
@@ -929,8 +889,10 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
             return nullptr;
         }
 
-        llvm::AllocaInst *var = *it;
-        return llvm->ir->CreateLoad(var->getAllocatedType(), var, var->getName());
+        LLVMTypeRef type = LLVMGetAllocatedType(*it);
+        size_t length; const char *name = LLVMGetValueName2(*it, &length);
+
+        return LLVMBuildLoad2(llvm->ir, type, *it, name);
         } break;
     case AST_LITERAL: {
         switch (ast->literal.type.prim) {
@@ -938,24 +900,27 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
             PANIC("undeterminate signage of integer");
             break;
         case T_SIGNED:
+            switch (ast->literal.type.size) {
+            case 1: return LLVMConstInt(LLVMInt8Type(), ast->literal.ival, true);
+            case 2: return LLVMConstInt(LLVMInt16Type(), ast->literal.ival, true);
+            case 4: return LLVMConstInt(LLVMInt32Type(), ast->literal.ival, true);
+            case 8: return LLVMConstInt(LLVMInt64Type(), ast->literal.ival, true);
+            default: PANIC("Invalid integer size %d", ast->literal.type.size);
+            }
+            break;
         case T_UNSIGNED:
             switch (ast->literal.type.size) {
-            case 1: return llvm->ir->getInt8(ast->literal.ival);
-            case 2: return llvm->ir->getInt16(ast->literal.ival);
-            case 4: return llvm->ir->getInt32(ast->literal.ival);
-            case 8: return llvm->ir->getInt64(ast->literal.ival);
-            default:
-                PANIC("invalid integer size: %d", ast->literal.type.size);
-                return nullptr;
+            case 1: return LLVMConstInt(LLVMInt8Type(), ast->literal.ival, false);
+            case 2: return LLVMConstInt(LLVMInt16Type(), ast->literal.ival, false);
+            case 4: return LLVMConstInt(LLVMInt32Type(), ast->literal.ival, false);
+            case 8: return LLVMConstInt(LLVMInt64Type(), ast->literal.ival, false);
+            default: PANIC("Invalid integer size %d", ast->literal.type.size);
             }
             break;
         case T_FLOAT:
             switch (ast->literal.type.size) {
-            case 4:
-            case 8:
-                return llvm::ConstantFP::get(
-                    llvm_type_from_type_expr(&llvm->context, ast->literal.type),
-                    ast->literal.fval);
+            case 4: return LLVMConstReal(LLVMFloatType(), ast->literal.fval);
+            case 8: return LLVMConstReal(LLVMDoubleType(), ast->literal.fval);
             default:
                 PANIC("invalid float size: %d", ast->literal.type.size);
                 return nullptr;
@@ -963,7 +928,7 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
             break;
         case T_BOOL:
             switch (ast->literal.type.size) {
-            case 1: return llvm->ir->getInt1(ast->literal.bval);
+            case 1: return LLVMConstInt(LLVMInt1Type(), ast->literal.bval, false);
             default:
                 PANIC("invalid boolean size: %d", ast->literal.type.size);
                 return nullptr;
@@ -977,14 +942,18 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
         }
         } break;
     case AST_BINARY_OP: {
-        llvm::Value *lhs = llvm_codegen_expr(llvm, ast->binary_op.lhs);
-        llvm::Value *rhs = llvm_codegen_expr(llvm, ast->binary_op.rhs);
+        LLVMValueRef lhs = llvm_codegen_expr(llvm, ast->binary_op.lhs);
+        LLVMValueRef rhs = llvm_codegen_expr(llvm, ast->binary_op.rhs);
+
+        // TODO(jesper): need to grab the type to know which instruction to emit
+        // TypeExpr lhs_type = ast_typecheck(ast->binary_op.lhs, T_UNKNOWN, nullptr, nullptr);
+        // TypeExpr rhs_type = ast_typecheck(ast->binary_op.lhs, T_UNKNOWN, nullptr, nullptr);
 
         switch (ast->binary_op.op.type) {
-        case '+': return llvm->ir->CreateAdd(lhs, rhs);
-        case '-': return llvm->ir->CreateSub(lhs, rhs);
-        case '*': return llvm->ir->CreateMul(lhs, rhs);
-        case '/': return llvm->ir->CreateSDiv(lhs, rhs);
+        case '+': return LLVMBuildAdd(llvm->ir, lhs, rhs, "");
+        case '-': return LLVMBuildSub(llvm->ir, lhs, rhs, "");
+        case '*': return LLVMBuildMul(llvm->ir, lhs, rhs, "");
+        case '/': return LLVMBuildSDiv(llvm->ir, lhs, rhs, "");
         default:
             LOG_ERROR("Invalid binary op '%.*s'",
                       STRFMT(ast->binary_op.op.str));
@@ -1000,28 +969,26 @@ llvm::Value* llvm_codegen_expr(LLVMIR *llvm, AST *ast)
 }
 
 
-llvm::Function* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
+void* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
 {
     PANIC_IF(ast->type != AST_PROC_DECL, "expected AST_PROC_DECL");
 
     SArena scratch = tl_scratch_arena();
 
-    llvm::Type *ret_type = llvm_type_from_type_expr(
-        &llvm->context,
+    LLVMTypeRef ret_type = llvm_type_from_type_expr(
+        llvm->context,
         ast->proc.ret_type);
 
-    if (!ret_type) ret_type = llvm::Type::getVoidTy(llvm->context);
+    if (!ret_type) ret_type = LLVMVoidType();
 
-    llvm::Function *func = llvm::Function::Create(
-        llvm::FunctionType::get(ret_type, false),
-        llvm::Function::ExternalLinkage,
-        sz_string(ast->proc.identifier.str, scratch),
-        llvm->module);
+    LLVMTypeRef func_type = LLVMFunctionType(ret_type, nullptr, 0, false);
+    LLVMValueRef func = LLVMAddFunction(llvm->module, sz_string(ast->proc.identifier.str, scratch), func_type);
 
-    llvm::BasicBlock *block = llvm::BasicBlock::Create(llvm->context, "entry", func);
-    llvm->ir->SetInsertPoint(block);
+    LLVMBasicBlockRef entry = LLVMCreateBasicBlockInContext(llvm->context, "entry");
+    LLVMAppendExistingBasicBlock(func, entry);
+    LLVMPositionBuilderAtEnd(llvm->ir, entry);
 
-    llvm->scope.entry = block;
+    llvm->scope.entry = entry;
     map_destroy(&llvm->scope.variables);
 
     for (auto *stmt = ast->proc.body; stmt; stmt = stmt->next) {
@@ -1031,10 +998,10 @@ llvm::Function* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
             break;
         case AST_RETURN:
             if (stmt->ret.expr) {
-                auto *val = llvm_codegen_expr(llvm, stmt->ret.expr);
-                llvm->ir->CreateRet(val);
+                LLVMValueRef val = llvm_codegen_expr(llvm, stmt->ret.expr);
+                LLVMBuildRet(llvm->ir, val);
             } else {
-                llvm->ir->CreateRetVoid();
+                LLVMBuildRetVoid(llvm->ir);
             }
             break;
         default:
@@ -1044,46 +1011,6 @@ llvm::Function* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
     }
 
     return func;
-}
-
-void emit_ast_x64(StringBuilder *sb, AST *ast)
-{
-    for (; ast; ast = ast->next) {
-        switch (ast->type) {
-        case AST_LITERAL:
-            append_stringf(sb, "  mov eax, %.*s\n", STRFMT(ast->literal.token.str));
-            break;
-        case AST_PROC_DECL:
-            append_stringf(sb, "%.*s:\n", STRFMT(ast->proc.identifier.str));
-            emit_ast_x64(sb, ast->proc.body);
-            break;
-        case AST_BINARY_OP:
-            emit_ast_x64(sb, ast->binary_op.lhs);
-            append_stringf(sb, "  push eax\n");
-            emit_ast_x64(sb, ast->binary_op.rhs);
-            append_stringf(sb, "  pop ebx\n");
-
-            switch (ast->binary_op.op.type) {
-            case '+': append_stringf(sb, "  add eax, ebx\n"); break;
-            case '-': append_stringf(sb, "  sub eax, ebx\n"); break;
-            case '*': append_stringf(sb, "  imul eax, ebx\n"); break;
-            case '/': append_stringf(sb, "  idiv ebx\n"); break;
-            default:
-                LOG_ERROR("Invalid binary op '%.*s'",
-                          STRFMT(ast->binary_op.op.str));
-                break;
-            }
-
-            break;
-        case AST_RETURN:
-            if (ast->ret.expr) emit_ast_x64(sb, ast->ret.expr);
-            append_stringf(sb, "  ret\n");
-            break;
-        default:
-            LOG_ERROR("Invalid AST node type '%s'", sz_from_enum(ast->type));
-            break;
-        }
-    }
 }
 
 enum OutputType : i32 {
@@ -1207,9 +1134,9 @@ int main(int argc, char *argv[])
     debug_print_ast(module.ast);
 
     LLVMIR llvm{};
-    llvm.ir = new llvm::IRBuilder<llvm::NoFolder>(
-        llvm::BasicBlock::Create(llvm.context, "entry"));
-    llvm.module = new llvm::Module("tir", llvm.context);
+    llvm.context = LLVMGetGlobalContext();
+    llvm.module = LLVMModuleCreateWithNameInContext("tir", llvm.context);
+    llvm.ir = LLVMCreateBuilderInContext(llvm.context);
 
     {
         SArena scratch = tl_scratch_arena();
@@ -1220,7 +1147,10 @@ int main(int argc, char *argv[])
             }
         }
 
-        llvm.module->print(llvm::outs(), nullptr);
+        if (char *mod = LLVMPrintModuleToString(llvm.module); mod) {
+            LOG_INFO("Generated LLVM IR:\n%s", mod);
+            LLVMDisposeMessage(mod);
+        }
     }
 
 
@@ -1235,20 +1165,23 @@ int main(int argc, char *argv[])
         LLVMInitializeX86AsmParser();
         LLVMInitializeX86AsmPrinter();
 
-        std::string target_triple = llvm::sys::getDefaultTargetTriple();
+        char *sz_error = nullptr;
+        char *target_triple = LLVMGetDefaultTargetTriple();
 
-        std::string error;
-        auto *target = llvm::TargetRegistry::lookupTarget(target_triple, error);
-        if (!target) LOG_ERROR("Failed to lookup target for triple '%s': %s", target_triple.c_str(), error.c_str());
+        LLVMTargetRef target;
+        if (LLVMGetTargetFromTriple(target_triple, &target, &sz_error) != 0) {
+            LOG_ERROR("Failed to get target from triple '%s': %s", target_triple, sz_error);
+            return -1;
+        }
 
-        llvm::TargetOptions target_opts{};
-        auto *target_machine = target->createTargetMachine(
+        LLVMTargetMachineRef target_machine = LLVMCreateTargetMachine(
+            target,
             target_triple, "generic", "",
-            target_opts,
-            llvm::Reloc::PIC_);
+            LLVMCodeGenLevelDefault,
+            LLVMRelocPIC,
+            LLVMCodeModelDefault);
 
-        llvm.module->setTargetTriple(target_triple);
-        llvm.module->setDataLayout(target_machine->createDataLayout());
+        LLVMSetTarget(llvm.module, target_triple);
 
         FileHandle fd;
         String path;
@@ -1263,31 +1196,14 @@ int main(int argc, char *argv[])
 
         defer { if(fd) close_file(fd); };
 
-#if defined(_WIN32)
-        // TODO(jesper): mega hacky. I need to figure out how to use llvm's file io properly to write a custom one using my file io procs
-        close_file(fd); fd = 0;
+        LLVMPassManagerRef pass_manager = LLVMCreatePassManager();
+        LLVMAddAnalysisPasses(target_machine, pass_manager);
+        LLVMRunPassManager(pass_manager, llvm.module);
 
-        std::error_code ec;
-        llvm::raw_fd_ostream out{ sz_string(path, scratch), ec };
-#elif 0
-        std::error_code ec;
-        llvm::raw_fd_ostream out{ sz_string(path, scratch), ec };
-#elif 1
-        llvm::raw_fd_ostream out{ (int)(i64)fd, false };
-#else
-        raw_file_ostream out{ fd };
-#endif
-
-        llvm::legacy::PassManager pass_manager{};
-        target_machine->addPassesToEmitFile(
-            pass_manager,
-            out, nullptr,
-            llvm::CGFT_ObjectFile);
-
-        pass_manager.run(*llvm.module);
-        array_add(&object_files, path);
-
-        out.flush();
+        if (!LLVMTargetMachineEmitToFile(target_machine, llvm.module, sz_string(path, scratch), LLVMObjectFile, &sz_error)) {
+            LOG_ERROR("Failed to emit object file: %s", sz_error);
+            return -1;
+        }
     }
 
     if (opts.out_type == OUTPUT_EXECUTABLE) {
