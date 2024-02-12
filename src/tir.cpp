@@ -1046,7 +1046,7 @@ int main(int argc, char *argv[])
     char *out_name    = nullptr;
     char *out_dir     = nullptr;
 
-    for (i32 i = 0; i < argc; i++) {
+    for (i32 i = 1; i < argc; i++) {
         if (argv[i][0] == '-') {
             if (argv[i][1] == 'h' || strcmp(&argv[i][1], "-help") == 0) {
                 print_usage();
@@ -1070,6 +1070,7 @@ int main(int argc, char *argv[])
     }
 
     if (!src) {
+        LOG_ERROR("No input file");
         print_usage();
         return -1;
     }
@@ -1155,7 +1156,6 @@ int main(int argc, char *argv[])
 
 
     DynamicArray<String> object_files{};
-
     {
         SArena scratch = tl_scratch_arena();
 
@@ -1200,10 +1200,21 @@ int main(int argc, char *argv[])
         LLVMAddAnalysisPasses(target_machine, pass_manager);
         LLVMRunPassManager(pass_manager, llvm.module);
 
-        if (!LLVMTargetMachineEmitToFile(target_machine, llvm.module, sz_string(path, scratch), LLVMObjectFile, &sz_error)) {
+        LLVMMemoryBufferRef buffer;
+        if (LLVMTargetMachineEmitToMemoryBuffer(
+                target_machine, llvm.module,
+                LLVMObjectFile,
+                &sz_error, &buffer) != 0)
+        {
             LOG_ERROR("Failed to emit object file: %s", sz_error);
             return -1;
         }
+
+        const char *data = LLVMGetBufferStart(buffer);
+        size_t size = LLVMGetBufferSize(buffer);
+        write_file(fd, data, size);
+
+        array_add(&object_files, path);
     }
 
     if (opts.out_type == OUTPUT_EXECUTABLE) {

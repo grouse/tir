@@ -18,9 +18,7 @@ Process* create_process(
     Array<String> args,
     ProcessOpts /*opts*/)
 {
-
     SArena scratch = tl_scratch_arena();
-
     char *sz_exe = sz_string(exe, scratch);
 
     posix_spawn_file_actions_t actions;
@@ -34,7 +32,6 @@ Process* create_process(
         PANIC("posix_spawnattr_init: %s", strerror(errno));
         return nullptr;
     }
-
 
     i32 argc = 0;
     Array<char*> argv; array_create(&argv, args.count+2, scratch);
