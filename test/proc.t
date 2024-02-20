@@ -1,8 +1,13 @@
-foobar :: () -> i32 {
-    return 2;
+foobar :: () {
+    return 1;
 }
 
-main :: ()
-{
-    return foobar();
+bar :: () -> i32;
+
+main :: () {
+    return bar();
+}
+
+bar :: () -> i32 {
+    return 3;
 }

@@ -232,6 +232,8 @@ struct Scope {
 struct LLVMProc {
     LLVMValueRef func;
     LLVMTypeRef  func_t;
+
+    LLVMBasicBlockRef entry;
 };
 
 struct LLVMIR {
@@ -551,10 +553,9 @@ AST* parse_proc_decl(Lexer *lexer, Module *module, Allocator mem) INTERNAL
                 }
             }
 
-
             AST *body = parse_statement(lexer, mem);
-            if (!body) {
-                PARSE_ERROR(lexer, "expected statement after procedure declaration");
+            if (!body && !require_next_token(lexer, ';')) {
+                PARSE_ERROR(lexer, "expected procedure body after decl");
                 return nullptr;
             }
 
@@ -1052,29 +1053,33 @@ void* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
 {
     PANIC_IF(ast->type != AST_PROC_DECL, "expected AST_PROC_DECL");
 
-    SArena scratch = tl_scratch_arena();
+    LLVMProc *proc = map_find_emplace(&llvm->procedures, ast->proc_decl.identifier.str);
 
-    LLVMTypeRef ret_type = llvm_type_from_type_expr(
-        llvm->context,
-        ast->proc_decl.ret_type);
+    if (!proc->func) {
+        SArena scratch = tl_scratch_arena();
 
-    if (!ret_type) ret_type = LLVMVoidType();
+        LLVMTypeRef ret_type = llvm_type_from_type_expr(
+            llvm->context,
+            ast->proc_decl.ret_type);
 
-    LLVMTypeRef func_type = LLVMFunctionType(ret_type, nullptr, 0, false);
-    LLVMValueRef func = LLVMAddFunction(llvm->module, sz_string(ast->proc_decl.identifier.str, scratch), func_type);
+        if (!ret_type) ret_type = LLVMVoidType();
 
-    LLVMBasicBlockRef entry = LLVMCreateBasicBlockInContext(llvm->context, "entry");
-    LLVMAppendExistingBasicBlock(func, entry);
-    LLVMPositionBuilderAtEnd(llvm->ir, entry);
+        proc->func_t = LLVMFunctionType(ret_type, nullptr, 0, false);
+        proc->func = LLVMAddFunction(llvm->module, sz_string(ast->proc_decl.identifier.str, scratch), proc->func_t);
 
-    map_set(&llvm->procedures, ast->proc_decl.identifier.str, {
-        .func = func,
-        .func_t = func_type,
-    });
+        proc->entry = LLVMCreateBasicBlockInContext(llvm->context, "entry");
+        LLVMAppendExistingBasicBlock(proc->func, proc->entry);
+    }
 
-    llvm->scope.entry = entry;
+    if (ast->proc_decl.identifier == "main") {
+        llvm->scope.entry = proc->entry;
+    }
+
+    if (!ast->proc_decl.body) return proc->func;
+
     map_destroy(&llvm->scope.variables);
 
+    LLVMPositionBuilderAtEnd(llvm->ir, proc->entry);
     for (auto *stmt = ast->proc_decl.body; stmt; stmt = stmt->next) {
         switch (stmt->type) {
         case AST_VAR_DECL:
@@ -1094,7 +1099,7 @@ void* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
         }
     }
 
-    return func;
+    return proc->func;
 }
 
 enum OutputType : i32 {
