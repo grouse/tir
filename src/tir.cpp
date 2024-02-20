@@ -32,6 +32,7 @@ enum ASTType : i32 {
     AST_VAR_STORE,
 
     AST_PROC_DECL,
+    AST_PROC_CALL,
 
     AST_RETURN,
     AST_LITERAL,
@@ -46,6 +47,7 @@ const char* sz_from_enum(ASTType type)
     case AST_VAR_DECL:  return "var_decl";
     case AST_VAR_STORE: return "var_store";
     case AST_PROC_DECL: return "proc_decl";
+    case AST_PROC_CALL: return "proc_call";
     case AST_RETURN:    return "return";
     case AST_LITERAL:   return "literal";
     case AST_BINARY_OP: return "binary_op";
@@ -159,7 +161,10 @@ struct AST {
             Token identifier;
             TypeExpr ret_type;
             AST *body;
-        } proc;
+        } proc_decl;
+        struct {
+            Token identifier;
+        } proc_call;
         struct {
             Token identifier;
             TypeExpr type;
@@ -195,6 +200,7 @@ struct AST {
 
 enum SymbolType {
     SYM_VARIABLE,
+    SYM_PROC,
 };
 
 struct Symbol {
@@ -203,6 +209,9 @@ struct Symbol {
         struct {
             TypeExpr type;
         } variable;
+        struct {
+            AST *ast;
+        } proc;
     };
 };
 
@@ -220,10 +229,17 @@ struct Scope {
     HashTable<String, LLVMValueRef> variables;
 };
 
+struct LLVMProc {
+    LLVMValueRef func;
+    LLVMTypeRef  func_t;
+};
+
 struct LLVMIR {
     LLVMContextRef context;
     LLVMBuilderRef ir;
     LLVMModuleRef module;
+
+    HashTable<String, LLVMProc> procedures;
 
     Scope scope;
 };
@@ -279,11 +295,11 @@ void debug_print_ast(AST *ast, i32 depth = 0)
         case AST_PROC_DECL:
             LOG_INFO("%.*sproc %.*s [%s:%d]",
                      depth, indent,
-                     STRFMT(ast->proc.identifier.str),
-                     sz_from_enum(ast->proc.ret_type.prim),
-                     ast->proc.ret_type.size);
+                     STRFMT(ast->proc_decl.identifier.str),
+                     sz_from_enum(ast->proc_decl.ret_type.prim),
+                     ast->proc_decl.ret_type.size);
 
-            if (ast->proc.body) debug_print_ast(ast->proc.body, depth+1);
+            if (ast->proc_decl.body) debug_print_ast(ast->proc_decl.body, depth+1);
             break;
         case AST_RETURN:
             LOG_INFO("%.*sreturn", depth, indent);
@@ -368,10 +384,24 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
             return nullptr;
         }
     } else if (optional_token(lexer, TOKEN_IDENTIFIER)) {
-        expr = ALLOC_T(mem, AST) {
-            .type = AST_VAR_LOAD,
-            .var_load.identifier = lexer->t,
-        };
+        Token identifier = lexer->t;
+        if (optional_token(lexer, '(')) {
+            if (!require_next_token(lexer, ')')) {
+                PARSE_ERROR(lexer, "expected ')'");
+                return nullptr;
+            }
+
+            expr = ALLOC_T(mem, AST) {
+                .type = AST_PROC_CALL,
+                .proc_call.identifier = identifier,
+            };
+
+        } else {
+            expr = ALLOC_T(mem, AST) {
+                .type = AST_VAR_LOAD,
+                .var_load.identifier = lexer->t,
+            };
+        }
     }
 
     while (*lexer) {
@@ -483,7 +513,7 @@ AST* parse_statement(Lexer *lexer, Allocator mem) INTERNAL
     return nullptr;
 }
 
-AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
+AST* parse_proc_decl(Lexer *lexer, Module *module, Allocator mem) INTERNAL
 {
     Lexer stored = *lexer;
 
@@ -528,12 +558,19 @@ AST* parse_proc_decl(Lexer *lexer, Allocator mem) INTERNAL
                 return nullptr;
             }
 
-            return ALLOC_T(mem, AST) {
+            AST *proc = ALLOC_T(mem, AST) {
                 .type = AST_PROC_DECL,
-                .proc.identifier = identifier,
-                .proc.body = body,
-                .proc.ret_type = ret_type,
+                .proc_decl.identifier = identifier,
+                .proc_decl.body = body,
+                .proc_decl.ret_type = ret_type,
             };
+
+            map_find_emplace(&module->symbols, identifier.str, {
+                .type = SYM_PROC,
+                .proc = { proc },
+            });
+
+            return proc;
         }
     }
 
@@ -626,16 +663,26 @@ TypeExpr ast_typecheck(AST *ast, TypeExpr parent, Module *module, AST *proc)
             .variable = { ast->var_decl.type }
         });
 
-
         return ast->var_decl.type;
     case AST_PROC_DECL:
-        for (AST *stmt = ast->proc.body; stmt; stmt = stmt->next) {
-            if (ast_typecheck(stmt, ast->proc.ret_type, module, ast) == T_INVALID)
+        for (AST *stmt = ast->proc_decl.body; stmt; stmt = stmt->next) {
+            if (ast_typecheck(stmt, ast->proc_decl.ret_type, module, ast) == T_INVALID)
                 return { T_INVALID };
         }
 
         // TODO(jesper): proc type expr?
-        return ast->proc.ret_type;
+        return ast->proc_decl.ret_type;
+
+    case AST_PROC_CALL: {
+        Symbol *sym = map_find(&module->symbols, ast->proc_call.identifier.str);
+        if (!sym || sym->type != SYM_PROC) {
+            TERROR(ast->proc_call.identifier, "procedure not found: '%.*s'", STRFMT(ast->proc_call.identifier.str));
+            return { T_INVALID };
+        }
+
+        return sym->proc.ast->proc_decl.ret_type;
+        } break;
+
     case AST_RETURN: {
         PANIC_IF(!proc || proc->type != AST_PROC_DECL, "expected AST_PROC_DECL");
 
@@ -643,13 +690,13 @@ TypeExpr ast_typecheck(AST *ast, TypeExpr parent, Module *module, AST *proc)
         // TODO(jesper): I don't think this is correct, but I need to add more conversion rules and explicit return type syntax before really testing this further
         if (ast->ret.expr) ret_type = ast_typecheck(ast->ret.expr, { T_SIGNED }, module, proc);
 
-        if (proc->proc.ret_type == T_UNKNOWN)
-            proc->proc.ret_type = ret_type;
+        if (proc->proc_decl.ret_type == T_UNKNOWN)
+            proc->proc_decl.ret_type = ret_type;
 
-        if (proc->proc.ret_type.prim != ret_type.prim) {
+        if (proc->proc_decl.ret_type.prim != ret_type.prim) {
             TERROR(ast->ret.token,
                    "type mismatch in return statement; proc ret type dedeuced to [%s:%d], return expression deduced as [%s:%d]",
-                   sz_from_enum(proc->proc.ret_type.prim), proc->proc.ret_type.size,
+                   sz_from_enum(proc->proc_decl.ret_type.prim), proc->proc_decl.ret_type.size,
                    sz_from_enum(ret_type.prim), ret_type.size);
 
             return { T_INVALID };
@@ -803,27 +850,39 @@ TypeExpr ast_sizecheck(AST *ast, Module *module, AST *proc, i32 topdown_size = 0
 
         return lhs;
         } break;
+
     case AST_PROC_DECL:
-        for (AST *stmt = ast->proc.body; stmt; stmt = stmt->next) {
+        for (AST *stmt = ast->proc_decl.body; stmt; stmt = stmt->next) {
             if (ast_sizecheck(stmt, module, ast) == T_INVALID)
                 return { T_INVALID };
         }
 
-        return ast->proc.ret_type;
+        return ast->proc_decl.ret_type;
+
+    case AST_PROC_CALL: {
+        Symbol *sym = map_find(&module->symbols, ast->proc_call.identifier.str);
+        if (!sym || sym->type != SYM_PROC) {
+            TERROR(ast->proc_call.identifier, "procedure not found: '%.*s'", STRFMT(ast->proc_call.identifier.str));
+            return { T_INVALID };
+        }
+
+        return sym->proc.ast->proc_decl.ret_type;
+        } break;
+
     case AST_RETURN: {
         PANIC_IF(!proc || proc->type != AST_PROC_DECL, "expected AST_PROC_DECL");
 
-        TypeExpr ret_type = proc->proc.ret_type;
+        TypeExpr ret_type = proc->proc_decl.ret_type;
         if (ast->ret.expr)
             ret_type = ast_sizecheck(ast->ret.expr, module, proc, ret_type.size);
 
-        if (proc->proc.ret_type.size == 0 &&
-            proc->proc.ret_type != T_VOID)
+        if (proc->proc_decl.ret_type.size == 0 &&
+            proc->proc_decl.ret_type != T_VOID)
         {
-            proc->proc.ret_type.size = ret_type.size;
+            proc->proc_decl.ret_type.size = ret_type.size;
         }
 
-        if (ret_type.size != proc->proc.ret_type.size) {
+        if (ret_type.size != proc->proc_decl.ret_type.size) {
             TERROR(ast->ret.token, "size mismatch in return statement");
         }
 
@@ -866,6 +925,7 @@ LLVMValueRef llvm_codegen_expr(LLVMIR *llvm, AST *ast)
             // TODO(jesper): default init value
         }
         } break;
+
     case AST_VAR_STORE: {
         LLVMValueRef *it = map_find(
             &llvm->scope.variables,
@@ -879,6 +939,7 @@ LLVMValueRef llvm_codegen_expr(LLVMIR *llvm, AST *ast)
         LLVMValueRef rhs = llvm_codegen_expr(llvm, ast->var_store.rhs);
         return LLVMBuildStore(llvm->ir, rhs, *it);
         } break;
+
     case AST_VAR_LOAD: {
         LLVMValueRef *it = map_find(
             &llvm->scope.variables,
@@ -894,6 +955,17 @@ LLVMValueRef llvm_codegen_expr(LLVMIR *llvm, AST *ast)
 
         return LLVMBuildLoad2(llvm->ir, type, *it, name);
         } break;
+
+    case AST_PROC_CALL: {
+        LLVMProc *proc = map_find(&llvm->procedures, ast->proc_call.identifier.str);
+        if (!proc) {
+            TERROR(ast->proc_call.identifier, "unknown procedure '%.*s'", ast->proc_call.identifier.str);
+            return nullptr;
+        }
+
+        return LLVMBuildCall2(llvm->ir, proc->func_t, proc->func, nullptr, 0, "");
+        } break;
+
     case AST_LITERAL: {
         switch (ast->literal.type.prim) {
         case T_INTEGER:
@@ -941,6 +1013,7 @@ LLVMValueRef llvm_codegen_expr(LLVMIR *llvm, AST *ast)
             break;
         }
         } break;
+
     case AST_BINARY_OP: {
         LLVMValueRef lhs = llvm_codegen_expr(llvm, ast->binary_op.lhs);
         LLVMValueRef rhs = llvm_codegen_expr(llvm, ast->binary_op.rhs);
@@ -961,6 +1034,7 @@ LLVMValueRef llvm_codegen_expr(LLVMIR *llvm, AST *ast)
         }
         break;
     }
+
     default:
         LOG_ERROR("Invalid AST node type '%s'", sz_from_enum(ast->type));
         break;
@@ -977,21 +1051,26 @@ void* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
 
     LLVMTypeRef ret_type = llvm_type_from_type_expr(
         llvm->context,
-        ast->proc.ret_type);
+        ast->proc_decl.ret_type);
 
     if (!ret_type) ret_type = LLVMVoidType();
 
     LLVMTypeRef func_type = LLVMFunctionType(ret_type, nullptr, 0, false);
-    LLVMValueRef func = LLVMAddFunction(llvm->module, sz_string(ast->proc.identifier.str, scratch), func_type);
+    LLVMValueRef func = LLVMAddFunction(llvm->module, sz_string(ast->proc_decl.identifier.str, scratch), func_type);
 
     LLVMBasicBlockRef entry = LLVMCreateBasicBlockInContext(llvm->context, "entry");
     LLVMAppendExistingBasicBlock(func, entry);
     LLVMPositionBuilderAtEnd(llvm->ir, entry);
 
+    map_set(&llvm->procedures, ast->proc_decl.identifier.str, {
+        .func = func,
+        .func_t = func_type,
+    });
+
     llvm->scope.entry = entry;
     map_destroy(&llvm->scope.variables);
 
-    for (auto *stmt = ast->proc.body; stmt; stmt = stmt->next) {
+    for (auto *stmt = ast->proc_decl.body; stmt; stmt = stmt->next) {
         switch (stmt->type) {
         case AST_VAR_DECL:
             llvm_codegen_expr(llvm, stmt);
@@ -1109,12 +1188,12 @@ int main(int argc, char *argv[])
 
         AST **ptr = &module.ast;
         while (next_token(&lexer)) {
-            if (AST *proc = parse_proc_decl(&lexer, mem); proc) {
+            if (AST *proc = parse_proc_decl(&lexer, &module, mem); proc) {
                 array_add(&module.procedures, proc);
                 (*ptr) = proc;
                 ptr = &proc->next;
 
-                if (proc->proc.identifier == "main") module.entry = proc;
+                if (proc->proc_decl.identifier == "main") module.entry = proc;
             } else {
                 PARSE_ERROR(&lexer, "unknown declaration in global scope");
                 return -1;
