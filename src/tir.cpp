@@ -959,7 +959,12 @@ LLVMValueRef llvm_codegen_expr(LLVMIR *llvm, AST *ast)
     case AST_PROC_CALL: {
         LLVMProc *proc = map_find(&llvm->procedures, ast->proc_call.identifier.str);
         if (!proc) {
-            TERROR(ast->proc_call.identifier, "unknown procedure '%.*s'", ast->proc_call.identifier.str);
+            TERROR(ast->proc_call.identifier, "unknown procedure '%.*s'", STRFMT(ast->proc_call.identifier.str));
+            return nullptr;
+        }
+
+        if (!proc->func || !proc->func_t) {
+            TERROR(ast->proc_call.identifier, "procedure has not yet been generated: '%.*s'", STRFMT(ast->proc_call.identifier.str));
             return nullptr;
         }
 
