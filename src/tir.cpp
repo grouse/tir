@@ -160,6 +160,10 @@ struct AST {
         struct {
             Token identifier;
             TypeExpr ret_type;
+            struct {
+                u32 foreign : 1;
+                u32 unused  : 31;
+            } flags;
             AST *body;
         } proc_decl;
         struct {
@@ -431,6 +435,8 @@ AST* parse_expression(Lexer *lexer, Allocator mem, i32 min_prec = 0)
 TypeExpr parse_type_expression(Lexer *lexer)
 {
     if (optional_token(lexer, TOKEN_IDENTIFIER)) {
+        if (lexer->t == "void") return { T_VOID, 0 };
+
         if (lexer->t == "i8")  return { T_SIGNED,  1 };
         if (lexer->t == "i16") return { T_SIGNED,  2 };
         if (lexer->t == "i32") return { T_SIGNED,  4 };
@@ -469,10 +475,11 @@ AST* parse_statement(Lexer *lexer, Allocator mem) INTERNAL
         }
 
         return stmt;
-    } else if (optional_token(lexer, TOKEN_IDENTIFIER)) {
-        Token identifier = lexer->t;
+    } else if (Token t = peek_token(lexer); t == TOKEN_IDENTIFIER) {
+        Token identifier = t;
+        if (i32 kw = keyword_from_string(t.str); kw != KW_INVALID) {
+            next_token(lexer);
 
-        if (i32 kw = keyword_from_string(identifier.str); kw != KW_INVALID) {
             AST *ast = nullptr;
             switch (kw) {
             case KW_RETURN:
@@ -489,7 +496,9 @@ AST* parse_statement(Lexer *lexer, Allocator mem) INTERNAL
             }
 
             return ast;
-        } else if (optional_token(lexer, ':')) {
+        } else if (peek_nth_token(lexer, 2) == ':') {
+            t = next_nth_token(lexer, 2);
+
             AST *decl = ALLOC_T(mem, AST) {
                 .type = AST_VAR_DECL,
                 .var_decl.identifier = identifier,
@@ -501,14 +510,24 @@ AST* parse_statement(Lexer *lexer, Allocator mem) INTERNAL
             }
 
             if (!require_next_token(lexer, ';')) {
-                PARSE_ERROR(lexer, "expected ';' after declaration");
+                PARSE_ERROR(lexer, "expected ';' after declaration, got: '%.*s'", STRFMT(lexer->t.str));
                 return nullptr;
             }
 
             return decl;
         } else {
-            PARSE_ERROR(lexer, "unexpected identifier '%.*s'", STRFMT(lexer->t.str));
-            return nullptr;
+            AST *expr = parse_expression(lexer, mem);
+            if (!expr) {
+                PARSE_ERROR(lexer, "invalid statement, expected an expression");
+                return nullptr;
+            }
+
+            if (!require_next_token(lexer, ';')) {
+                PARSE_ERROR(lexer, "expected ';' after expression, got: '%.*s'", STRFMT(lexer->t.str));
+                return nullptr;
+            }
+
+            return expr;
         }
     }
 
@@ -519,9 +538,19 @@ AST* parse_proc_decl(Lexer *lexer, Module *module, Allocator mem) INTERNAL
 {
     Lexer stored = *lexer;
 
-    if (lexer->t.type != TOKEN_IDENTIFIER) return nullptr;
-    Token identifier = lexer->t;
+    bool foreign = false;
 
+    if (lexer->t == '#') {
+        if (optional_identifier(lexer, "foreign")) {
+            foreign = true;
+            next_token(lexer);
+        } else {
+            PARSE_ERROR(lexer, "unknown proc directive: %.*s", STRFMT(lexer->t.str));
+            return nullptr;
+        }
+    } else if (lexer->t.type != TOKEN_IDENTIFIER) return nullptr;
+
+    Token identifier = lexer->t;
 
     // TODO(jesper): this meains `main :\s*: ()` is valid syntax, should it be?
     if (optional_token(lexer, ':') && optional_token(lexer, ':')) {
@@ -553,17 +582,27 @@ AST* parse_proc_decl(Lexer *lexer, Module *module, Allocator mem) INTERNAL
                 }
             }
 
-            AST *body = parse_statement(lexer, mem);
-            if (!body && !require_next_token(lexer, ';')) {
-                PARSE_ERROR(lexer, "expected procedure body after decl");
-                return nullptr;
+            AST *body = nullptr;
+            if (foreign) {
+                if (!require_next_token(lexer, ';')) {
+                    PARSE_ERROR(lexer, "invalid procedure body for extern proc");
+                    return nullptr;
+                }
+            } else {
+                body = parse_statement(lexer, mem);
+
+                if (!body && !require_next_token(lexer, ';')) {
+                    PARSE_ERROR(lexer, "expected procedure body after decl");
+                    return nullptr;
+                }
             }
 
             AST *proc = ALLOC_T(mem, AST) {
                 .type = AST_PROC_DECL,
                 .proc_decl.identifier = identifier,
-                .proc_decl.body = body,
                 .proc_decl.ret_type = ret_type,
+                .proc_decl.flags.foreign = foreign,
+                .proc_decl.body = body,
             };
 
             map_find_emplace(&module->symbols, identifier.str, {
@@ -1067,35 +1106,40 @@ void* llvm_codegen_proc(LLVMIR *llvm, AST *ast)
         proc->func_t = LLVMFunctionType(ret_type, nullptr, 0, false);
         proc->func = LLVMAddFunction(llvm->module, sz_string(ast->proc_decl.identifier.str, scratch), proc->func_t);
 
-        proc->entry = LLVMCreateBasicBlockInContext(llvm->context, "entry");
-        LLVMAppendExistingBasicBlock(proc->func, proc->entry);
+        if (ast->proc_decl.flags.foreign) {
+            LLVMSetLinkage(proc->func, LLVMExternalLinkage);
+        } else {
+            proc->entry = LLVMCreateBasicBlockInContext(llvm->context, "entry");
+            LLVMAppendExistingBasicBlock(proc->func, proc->entry);
+        }
     }
 
     if (ast->proc_decl.identifier == "main") {
         llvm->scope.entry = proc->entry;
     }
 
-    if (!ast->proc_decl.body) return proc->func;
+    if (ast->proc_decl.body) {
+        map_destroy(&llvm->scope.variables);
 
-    map_destroy(&llvm->scope.variables);
-
-    LLVMPositionBuilderAtEnd(llvm->ir, proc->entry);
-    for (auto *stmt = ast->proc_decl.body; stmt; stmt = stmt->next) {
-        switch (stmt->type) {
-        case AST_VAR_DECL:
-            llvm_codegen_expr(llvm, stmt);
-            break;
-        case AST_RETURN:
-            if (stmt->ret.expr) {
-                LLVMValueRef val = llvm_codegen_expr(llvm, stmt->ret.expr);
-                LLVMBuildRet(llvm->ir, val);
-            } else {
-                LLVMBuildRetVoid(llvm->ir);
+        LLVMPositionBuilderAtEnd(llvm->ir, proc->entry);
+        for (auto *stmt = ast->proc_decl.body; stmt; stmt = stmt->next) {
+            switch (stmt->type) {
+            case AST_PROC_CALL:
+            case AST_VAR_DECL:
+                llvm_codegen_expr(llvm, stmt);
+                break;
+            case AST_RETURN:
+                if (stmt->ret.expr) {
+                    LLVMValueRef val = llvm_codegen_expr(llvm, stmt->ret.expr);
+                    LLVMBuildRet(llvm->ir, val);
+                } else {
+                    LLVMBuildRetVoid(llvm->ir);
+                }
+                break;
+            default:
+                LOG_ERROR("Invalid statement type '%s'", sz_from_enum(stmt->type));
+                break;
             }
-            break;
-        default:
-            LOG_ERROR("Invalid statement type '%s'", sz_from_enum(stmt->type));
-            break;
         }
     }
 
@@ -1318,6 +1362,8 @@ int main(int argc, char *argv[])
 
         array_add(&args, object_files);
         array_add(&args, { String{ "-o" }, exe_name });
+        array_add(&args, { String{ "-L" }, string(out_dir) });
+        array_add(&args, String{ "-lextern" });
 
         run_process("clang", args);
     }

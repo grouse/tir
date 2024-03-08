@@ -4,8 +4,11 @@ foobar :: () {
 
 bar :: () -> i32;
 
+#foreign hello_world :: () -> i32;
+
 main :: () {
-    return bar();
+    hello_world();
+    return 2;
 }
 
 bar :: () -> i32 {
